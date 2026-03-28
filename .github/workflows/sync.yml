@@ -15,9 +15,9 @@ jobs:
       - name: Checkout bussines_idea
         uses: actions/checkout@v4
         with:
-          repository: ${{ secrets.BUSSINES_IDEA_REPOSITORY || 'akina910/bussines_idea' }}
+          repository: akina910/bussines_idea
           path: source-bussines-idea
-          token: ${{ secrets.BUSSINES_IDEA_GITHUB_TOKEN || github.token }}
+          token: ${{ secrets.BUSSINES_IDEA_GITHUB_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -30,5 +30,5 @@ jobs:
           ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
           ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
           BUSSINES_IDEA_REPO_PATH: ./source-bussines-idea
-          BUSSINES_IDEA_REPO_URL: ${{ secrets.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
+          BUSSINES_IDEA_REPO_URL: https://github.com/akina910/bussines_idea
         run: node sync-bussines-idea-to-asana.mjs
