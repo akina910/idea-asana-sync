@@ -12,7 +12,7 @@ jobs:
       - name: Checkout tool repo
         uses: actions/checkout@v4
 
-      - name: Checkout bussines_idea
+      - name: Checkout idea source repo
         uses: actions/checkout@v4
         with:
           repository: akina910/bussines_idea
@@ -31,4 +31,4 @@ jobs:
           ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
           BUSSINES_IDEA_REPO_PATH: ./source-bussines-idea
           BUSSINES_IDEA_REPO_URL: https://github.com/akina910/bussines_idea
-        run: node sync-bussines-idea-to-asana.mjs
+        run: node sync-ideas-to-asana.mjs

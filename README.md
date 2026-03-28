@@ -1,4 +1,4 @@
-# bussines-idea-asana-sync
+# idea-asana-sync
 
 `bussines_idea` を読んで、Asana を入口一覧として更新する独立ツール。
 
@@ -49,12 +49,12 @@
 
 ## ローカル確認
 ```bash
-node sync-bussines-idea-to-asana.mjs --dry-run
+node sync-ideas-to-asana.mjs --dry-run
 ```
 
 ## 実反映
 ```bash
 ASANA_ACCESS_TOKEN=... \
 ASANA_PROJECT_URL=... \
-node sync-bussines-idea-to-asana.mjs
+node sync-ideas-to-asana.mjs
 ```
