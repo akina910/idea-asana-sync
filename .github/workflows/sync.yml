@@ -7,6 +7,7 @@ on:
   repository_dispatch:
     types:
       - bussines-idea-updated
+      - idea-source-updated
 
 jobs:
   sync:
@@ -18,9 +19,9 @@ jobs:
       - name: Checkout idea source repo
         uses: actions/checkout@v4
         with:
-          repository: akina910/bussines_idea
+          repository: ${{ vars.SOURCE_REPOSITORY || vars.BUSSINES_IDEA_REPOSITORY || 'akina910/bussines_idea' }}
           path: source-bussines-idea
-          token: ${{ secrets.BUSSINES_IDEA_GITHUB_TOKEN }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN || secrets.BUSSINES_IDEA_GITHUB_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -32,6 +33,6 @@ jobs:
           ASANA_ACCESS_TOKEN: ${{ secrets.ASANA_ACCESS_TOKEN }}
           ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
           ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
-          BUSSINES_IDEA_REPO_PATH: ./source-bussines-idea
-          BUSSINES_IDEA_REPO_URL: https://github.com/akina910/bussines_idea
+          SOURCE_REPO_PATH: ./source-bussines-idea
+          SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
         run: node sync-ideas-to-asana.mjs

@@ -66,8 +66,16 @@ function loadConfig({ dryRun }) {
     asanaToken,
     projectUrl,
     sectionName: process.env.ASANA_SECTION_NAME || null,
-    sourceRepoPath: process.env.BUSSINES_IDEA_REPO_PATH || DEFAULT_SOURCE_REPO_PATH,
-    sourceRepoUrl: (process.env.BUSSINES_IDEA_REPO_URL || DEFAULT_SOURCE_REPO_URL).replace(/\/$/, ""),
+    sourceRepoPath:
+      process.env.SOURCE_REPO_PATH ||
+      process.env.BUSSINES_IDEA_REPO_PATH ||
+      DEFAULT_SOURCE_REPO_PATH,
+    sourceRepoUrl:
+      (
+        process.env.SOURCE_REPO_URL ||
+        process.env.BUSSINES_IDEA_REPO_URL ||
+        DEFAULT_SOURCE_REPO_URL
+      ).replace(/\/$/, ""),
   };
 }
 
