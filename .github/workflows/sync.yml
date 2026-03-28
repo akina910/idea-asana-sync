@@ -1,0 +1,34 @@
+name: Sync Asana
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tool repo
+        uses: actions/checkout@v4
+
+      - name: Checkout bussines_idea
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.BUSSINES_IDEA_REPOSITORY || 'akina910/bussines_idea' }}
+          path: source-bussines-idea
+          token: ${{ secrets.BUSSINES_IDEA_GITHUB_TOKEN || github.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Sync ideas to Asana
+        env:
+          ASANA_ACCESS_TOKEN: ${{ secrets.ASANA_ACCESS_TOKEN }}
+          ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
+          ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
+          BUSSINES_IDEA_REPO_PATH: ./source-bussines-idea
+          BUSSINES_IDEA_REPO_URL: ${{ secrets.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
+        run: node sync-bussines-idea-to-asana.mjs
