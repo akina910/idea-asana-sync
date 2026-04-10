@@ -166,6 +166,16 @@ function extractSection(markdown, heading) {
   return collected.join(" ").trim() || null;
 }
 
+const NEXT_ACTION_MAX_LEN = 200;
+const NEXT_ACTION_SUFFIX = "…(詳細はhandoffを参照)";
+
+function truncateNextAction(text) {
+  if (!text || text.length <= NEXT_ACTION_MAX_LEN) {
+    return text;
+  }
+  return `${text.slice(0, NEXT_ACTION_MAX_LEN - NEXT_ACTION_SUFFIX.length)}${NEXT_ACTION_SUFFIX}`;
+}
+
 function buildTaskNotes(idea, config) {
   const ideaUrl = `${config.sourceRepoUrl}/blob/main/${idea.ideaPath}`;
   const notesUrl = `${config.sourceRepoUrl}/blob/main/${idea.notesPath}`;
@@ -181,7 +191,7 @@ function buildTaskNotes(idea, config) {
     "要約",
     idea.summary,
     "",
-    `次アクション: ${idea.nextAction}`,
+    `次アクション: ${truncateNextAction(idea.nextAction)}`,
     "",
     `idea: ${ideaUrl}`,
     `notes: ${notesUrl}`,
