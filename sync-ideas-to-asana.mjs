@@ -16,7 +16,11 @@ async function main() {
   const ideas = await Promise.all(rows.map((row) => hydrateIdea(row, config)));
 
   if (dryRun) {
-    process.stdout.write(`${JSON.stringify(ideas, null, 2)}\n`);
+    const dryRunOutput = ideas.map((idea) => ({
+      ...idea,
+      _section: config.useStatusSections ? (idea.status || "未分類") : (config.sectionName || null),
+    }));
+    process.stdout.write(`${JSON.stringify(dryRunOutput, null, 2)}\n`);
     return;
   }
 
@@ -26,24 +30,41 @@ async function main() {
     throw new Error("ASANA_PROJECT_URL から project GID を読めませんでした。");
   }
 
-  const sectionGid = config.sectionName
-    ? await ensureSection(asana, projectGid, config.sectionName)
-    : null;
+  // sectionGid cache: status (or fixed name) → gid
+  const sectionCache = new Map();
+  async function resolveSectionGid(idea) {
+    if (config.useStatusSections) {
+      const key = idea.status || "未分類";
+      if (!sectionCache.has(key)) {
+        sectionCache.set(key, await ensureSection(asana, projectGid, key));
+      }
+      return sectionCache.get(key);
+    }
+    if (config.sectionName) {
+      if (!sectionCache.has(config.sectionName)) {
+        sectionCache.set(config.sectionName, await ensureSection(asana, projectGid, config.sectionName));
+      }
+      return sectionCache.get(config.sectionName);
+    }
+    return null;
+  }
+
   const tasks = await listProjectTasks(asana, projectGid);
 
   const results = [];
   for (const idea of ideas) {
+    const targetSectionGid = await resolveSectionGid(idea);
     const existing = tasks.find((task) => task.name.startsWith(`[${idea.id}] `));
     if (existing) {
       await updateTask(asana, existing.gid, idea);
-      if (sectionGid) {
-        await addTaskToSection(asana, sectionGid, existing.gid);
+      if (targetSectionGid) {
+        await addTaskToSection(asana, targetSectionGid, existing.gid);
       }
       results.push({ action: "updated", id: idea.id, taskGid: existing.gid });
       continue;
     }
 
-    const created = await createTask(asana, projectGid, idea, sectionGid);
+    const created = await createTask(asana, projectGid, idea, targetSectionGid);
     results.push({ action: "created", id: idea.id, taskGid: created.gid });
   }
 
@@ -66,6 +87,7 @@ function loadConfig({ dryRun }) {
     asanaToken,
     projectUrl,
     sectionName: process.env.ASANA_SECTION_NAME || null,
+    useStatusSections: process.env.ASANA_USE_STATUS_SECTIONS === "true",
     sourceRepoPath:
       process.env.SOURCE_REPO_PATH ||
       process.env.BUSSINES_IDEA_REPO_PATH ||

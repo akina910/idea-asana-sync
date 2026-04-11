@@ -32,7 +32,13 @@ jobs:
         env:
           ASANA_ACCESS_TOKEN: ${{ secrets.ASANA_ACCESS_TOKEN }}
           ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
+          # ASANA_SECTION_NAME: set this secret to place all tasks in a single named section (legacy)
           ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
+          # ASANA_USE_STATUS_SECTIONS: set to "true" to auto-create sections per project status
+          ASANA_USE_STATUS_SECTIONS: ${{ vars.ASANA_USE_STATUS_SECTIONS }}
           SOURCE_REPO_PATH: ./source-bussines-idea
           SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
         run: node sync-ideas-to-asana.mjs
+        # Token rotate reminder: Asana PAT expires 2027-03 (1 year from issue).
+        # Rotate before expiry: Settings → Apps → Manage developer apps → Revoke & reissue,
+        # then update the ASANA_ACCESS_TOKEN secret in this repo.
