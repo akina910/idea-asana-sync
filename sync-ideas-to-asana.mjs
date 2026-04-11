@@ -2,6 +2,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ASANA_BASE_URL = "https://app.asana.com/api/1.0";
 const DEFAULT_SOURCE_REPO_PATH = path.resolve("./source-bussines-idea");
@@ -101,7 +102,7 @@ function loadConfig({ dryRun }) {
   };
 }
 
-function extractProjectGidFromUrl(projectUrl) {
+export function extractProjectGidFromUrl(projectUrl) {
   if (!projectUrl) {
     return null;
   }
@@ -110,7 +111,7 @@ function extractProjectGidFromUrl(projectUrl) {
   return match?.[1] || null;
 }
 
-function parseIndexTable(markdown) {
+export function parseIndexTable(markdown) {
   const lines = markdown.split("\n");
   const tableStart = lines.findIndex((line) => line.startsWith("| ID |"));
   if (tableStart === -1) {
@@ -167,7 +168,7 @@ async function hydrateIdea(row, config) {
   };
 }
 
-function extractSection(markdown, heading) {
+export function extractSection(markdown, heading) {
   const lines = markdown.split("\n");
   const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
   if (start === -1) {
@@ -191,7 +192,7 @@ function extractSection(markdown, heading) {
 const NEXT_ACTION_MAX_LEN = 200;
 const NEXT_ACTION_SUFFIX = "…(詳細はhandoffを参照)";
 
-function truncateNextAction(text) {
+export function truncateNextAction(text) {
   if (!text || text.length <= NEXT_ACTION_MAX_LEN) {
     return text;
   }
@@ -302,7 +303,9 @@ async function addTaskToSection(asana, sectionGid, taskGid) {
   });
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
