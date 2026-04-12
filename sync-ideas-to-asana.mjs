@@ -141,7 +141,7 @@ export function parseIndexTable(markdown) {
       oneLine: cells[3],
       status: cells[4],
       implementation: cells[5],
-      splitRepo: cells[6],
+      splitRepo: stripCode(cells[6]),
       nextAction: cells[7],
       ideaPath: stripCode(cells[8]),
       notesPath: stripCode(cells[9]),
@@ -247,18 +247,37 @@ function createAsanaClient(token) {
       throw new Error(`Asana API error: ${response.status} ${JSON.stringify(json)}`);
     }
 
-    return json.data;
+    return json;
   };
 }
 
 async function listProjectTasks(asana, projectGid) {
-  return asana("GET", `/projects/${projectGid}/tasks`, {
+  return paginateAsanaCollection(asana, `/projects/${projectGid}/tasks`, {
     query: { opt_fields: "gid,name,completed", limit: 100 },
   });
 }
 
+export async function paginateAsanaCollection(asana, endpoint, { query } = {}) {
+  const items = [];
+  let offset = null;
+
+  do {
+    const response = await asana("GET", endpoint, {
+      query: {
+        ...query,
+        ...(offset ? { offset } : {}),
+      },
+    });
+
+    items.push(...(response.data || []));
+    offset = response.next_page?.offset || null;
+  } while (offset);
+
+  return items;
+}
+
 async function ensureSection(asana, projectGid, sectionName) {
-  const sections = await asana("GET", `/projects/${projectGid}/sections`, {
+  const sections = await paginateAsanaCollection(asana, `/projects/${projectGid}/sections`, {
     query: { opt_fields: "gid,name" },
   });
 
@@ -271,7 +290,7 @@ async function ensureSection(asana, projectGid, sectionName) {
     body: { name: sectionName },
   });
 
-  return created.gid;
+  return created.data.gid;
 }
 
 async function createTask(asana, projectGid, idea, sectionGid) {
@@ -285,16 +304,18 @@ async function createTask(asana, projectGid, idea, sectionGid) {
     body.memberships = [{ project: projectGid, section: sectionGid }];
   }
 
-  return asana("POST", "/tasks", { body });
+  const response = await asana("POST", "/tasks", { body });
+  return response.data;
 }
 
 async function updateTask(asana, taskGid, idea) {
-  return asana("PUT", `/tasks/${taskGid}`, {
+  const response = await asana("PUT", `/tasks/${taskGid}`, {
     body: {
       name: idea.taskName,
       notes: idea.notes,
     },
   });
+  return response.data;
 }
 
 async function addTaskToSection(asana, sectionGid, taskGid) {

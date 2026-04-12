@@ -4,6 +4,7 @@ import {
   extractProjectGidFromUrl,
   parseIndexTable,
   extractSection,
+  paginateAsanaCollection,
   truncateNextAction,
 } from "./sync-ideas-to-asana.mjs";
 
@@ -138,6 +139,11 @@ describe("parseIndexTable", () => {
     assert.ok(!rows[0].ideaPath.includes("`"));
   });
 
+  it("strips backtick code formatting from splitRepo", () => {
+    const rows = parseIndexTable(minimalTable.replace("| - | 次は〇〇をする |", "| `repo-name` | 次は〇〇をする |"));
+    assert.equal(rows[0].splitRepo, "repo-name");
+  });
+
   it("parses multiple rows", () => {
     const md = `| ID | タイトル | タイプ | 一言 | 状態 | 実装 | 分離repo | 次アクション | idea | notes | handoff |
 |----|----------|--------|------|------|------|----------|-------------|------|-------|---------|
@@ -166,5 +172,47 @@ describe("parseIndexTable", () => {
     const rows = parseIndexTable(md);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].id, "BI-002");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// paginateAsanaCollection
+// ---------------------------------------------------------------------------
+describe("paginateAsanaCollection", () => {
+  it("collects items across multiple pages", async () => {
+    const calls = [];
+    const asana = async (_method, _endpoint, { query } = {}) => {
+      calls.push(query);
+      if (!query?.offset) {
+        return {
+          data: [{ gid: "1" }, { gid: "2" }],
+          next_page: { offset: "page-2" },
+        };
+      }
+
+      return {
+        data: [{ gid: "3" }],
+        next_page: null,
+      };
+    };
+
+    const items = await paginateAsanaCollection(asana, "/projects/123/tasks", {
+      query: { limit: 100, opt_fields: "gid,name" },
+    });
+
+    assert.deepEqual(items, [{ gid: "1" }, { gid: "2" }, { gid: "3" }]);
+    assert.deepEqual(calls, [
+      { limit: 100, opt_fields: "gid,name" },
+      { limit: 100, opt_fields: "gid,name", offset: "page-2" },
+    ]);
+  });
+
+  it("returns a single page when next_page is absent", async () => {
+    const asana = async () => ({
+      data: [{ gid: "only" }],
+    });
+
+    const items = await paginateAsanaCollection(asana, "/projects/123/sections");
+    assert.deepEqual(items, [{ gid: "only" }]);
   });
 });
