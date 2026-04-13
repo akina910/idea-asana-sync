@@ -9,6 +9,8 @@ const DEFAULT_SOURCE_REPO_PATH = path.resolve("./source-bussines-idea");
 const DEFAULT_SOURCE_REPO_URL = "https://github.com/akina910/bussines_idea";
 const SYNCED_TASK_NAME_PATTERN = /^\[(BI-\d+)\]\s+/;
 const TASK_MANAGED_MARKER = "Managed-By: idea-asana-sync";
+const SOURCE_REPO_ALLOWED_PATH_PREFIXES = ["ideas/", "notes/", "handoff/"];
+const SOURCE_REPO_KNOWN_PLACEHOLDERS = new Set(["-", "—", "–", "未作成", "未設定", "N/A", "n/a"]);
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
@@ -329,12 +331,41 @@ function serializeTaskPreview(task) {
   };
 }
 
-function buildTaskNotes(idea, config) {
-  const ideaUrl = `${config.sourceRepoUrl}/blob/main/${idea.ideaPath}`;
-  const notesUrl = `${config.sourceRepoUrl}/blob/main/${idea.notesPath}`;
-  const handoffUrl = `${config.sourceRepoUrl}/blob/main/${idea.handoffPath}`;
+export function buildSourceRepoFileUrl(sourceRepoUrl, repoPath) {
+  if (typeof repoPath !== "string") {
+    return null;
+  }
 
-  return [
+  const normalizedRepoPath = repoPath.trim().replace(/^\.\/+/, "");
+  if (!normalizedRepoPath) {
+    return null;
+  }
+
+  if (
+    SOURCE_REPO_KNOWN_PLACEHOLDERS.has(normalizedRepoPath) ||
+    /^[-—–]+$/.test(normalizedRepoPath)
+  ) {
+    return null;
+  }
+
+  const isAllowedRepoPath = SOURCE_REPO_ALLOWED_PATH_PREFIXES.some((prefix) =>
+    normalizedRepoPath.startsWith(prefix),
+  );
+  if (!isAllowedRepoPath) {
+    console.warn(
+      `[warn] source repo path is not linkable; ignoring value: ${normalizedRepoPath}`,
+    );
+    return null;
+  }
+
+  return `${sourceRepoUrl}/blob/main/${normalizedRepoPath}`;
+}
+
+export function buildTaskNotes(idea, config) {
+  const ideaUrl = buildSourceRepoFileUrl(config.sourceRepoUrl, idea.ideaPath);
+  const notesUrl = buildSourceRepoFileUrl(config.sourceRepoUrl, idea.notesPath);
+  const handoffUrl = buildSourceRepoFileUrl(config.sourceRepoUrl, idea.handoffPath);
+  const lines = [
     TASK_MANAGED_MARKER,
     `ID: ${idea.id}`,
     `タイプ: ${idea.type}`,
@@ -347,10 +378,19 @@ function buildTaskNotes(idea, config) {
     "",
     `次アクション: ${truncateNextAction(idea.nextAction)}`,
     "",
-    `idea: ${ideaUrl}`,
-    `notes: ${notesUrl}`,
-    `handoff: ${handoffUrl}`,
-  ].join("\n");
+  ];
+
+  if (ideaUrl) {
+    lines.push(`idea: ${ideaUrl}`);
+  }
+  if (notesUrl) {
+    lines.push(`notes: ${notesUrl}`);
+  }
+  if (handoffUrl) {
+    lines.push(`handoff: ${handoffUrl}`);
+  }
+
+  return lines.join("\n");
 }
 
 function createAsanaClient(token) {

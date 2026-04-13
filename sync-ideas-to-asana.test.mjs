@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildSourceRepoFileUrl,
+  buildTaskNotes,
   extractProjectGidFromUrl,
   parseIndexTable,
   extractSection,
@@ -35,6 +37,96 @@ describe("extractProjectGidFromUrl", () => {
 
   it("returns null for a URL without a numeric GID", () => {
     assert.equal(extractProjectGidFromUrl("https://app.asana.com/home"), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildSourceRepoFileUrl / buildTaskNotes
+// ---------------------------------------------------------------------------
+describe("buildSourceRepoFileUrl", () => {
+  it("builds a blob URL for a normal repo path", () => {
+    assert.equal(
+      buildSourceRepoFileUrl("https://github.com/example/repo", "notes/BI-001.md"),
+      "https://github.com/example/repo/blob/main/notes/BI-001.md",
+    );
+  });
+
+  it("returns null for placeholder values", () => {
+    assert.equal(buildSourceRepoFileUrl("https://github.com/example/repo", "—"), null);
+    assert.equal(buildSourceRepoFileUrl("https://github.com/example/repo", "-"), null);
+    assert.equal(buildSourceRepoFileUrl("https://github.com/example/repo", "–"), null);
+    assert.equal(buildSourceRepoFileUrl("https://github.com/example/repo", "未作成"), null);
+    assert.equal(buildSourceRepoFileUrl("https://github.com/example/repo", "N/A"), null);
+  });
+
+  it("allows leading ./ and trims surrounding whitespace", () => {
+    assert.equal(
+      buildSourceRepoFileUrl("https://github.com/example/repo", " ./handoff/BI-001.md "),
+      "https://github.com/example/repo/blob/main/handoff/BI-001.md",
+    );
+  });
+
+  it("returns null and warns for unknown non-linkable values", () => {
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (message) => {
+      warnings.push(message);
+    };
+
+    try {
+      assert.equal(buildSourceRepoFileUrl("https://github.com/example/repo", "misc/BI-001.md"), null);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    assert.deepEqual(warnings, [
+      "[warn] source repo path is not linkable; ignoring value: misc/BI-001.md",
+    ]);
+  });
+});
+
+describe("buildTaskNotes", () => {
+  const baseIdea = {
+    id: "BI-005",
+    type: "Internal",
+    status: "分離済み",
+    implementation: "公開中",
+    splitRepo: "idea-asana-sync",
+    summary: "要約",
+    nextAction: "次の一手",
+    ideaPath: "ideas/BI-005.md",
+  };
+  const config = {
+    sourceRepoUrl: "https://github.com/example/repo",
+  };
+
+  it("omits notes and handoff links when the source paths are placeholders", () => {
+    const notes = buildTaskNotes(
+      {
+        ...baseIdea,
+        notesPath: "—",
+        handoffPath: "未作成",
+      },
+      config,
+    );
+
+    assert.match(notes, /idea: https:\/\/github\.com\/example\/repo\/blob\/main\/ideas\/BI-005\.md/);
+    assert.doesNotMatch(notes, /\nnotes: /);
+    assert.doesNotMatch(notes, /\nhandoff: /);
+  });
+
+  it("includes notes and handoff links when the source paths are valid", () => {
+    const notes = buildTaskNotes(
+      {
+        ...baseIdea,
+        notesPath: "notes/BI-005.md",
+        handoffPath: "handoff/BI-005.md",
+      },
+      config,
+    );
+
+    assert.match(notes, /\nnotes: https:\/\/github\.com\/example\/repo\/blob\/main\/notes\/BI-005\.md/);
+    assert.match(notes, /\nhandoff: https:\/\/github\.com\/example\/repo\/blob\/main\/handoff\/BI-005\.md/);
   });
 });
 
