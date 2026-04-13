@@ -4,7 +4,10 @@ import {
   extractProjectGidFromUrl,
   parseIndexTable,
   extractSection,
+  extractIdeaIdFromTaskName,
+  isManagedSyncTask,
   paginateAsanaCollection,
+  planTaskReconciliation,
   truncateNextAction,
 } from "./sync-ideas-to-asana.mjs";
 
@@ -72,6 +75,60 @@ describe("truncateNextAction", () => {
 
   it("handles empty string", () => {
     assert.equal(truncateNextAction(""), "");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractIdeaIdFromTaskName
+// ---------------------------------------------------------------------------
+describe("extractIdeaIdFromTaskName", () => {
+  it("extracts an idea ID from the synced task name", () => {
+    assert.equal(extractIdeaIdFromTaskName("[BI-005] Asana 入口アイディア同期ツール"), "BI-005");
+  });
+
+  it("returns null for non-synced task names", () => {
+    assert.equal(extractIdeaIdFromTaskName("手動タスク"), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isManagedSyncTask
+// ---------------------------------------------------------------------------
+describe("isManagedSyncTask", () => {
+  it("detects tasks managed by the current marker", () => {
+    assert.equal(
+      isManagedSyncTask({
+        name: "[BI-005] Asana 入口アイディア同期ツール",
+        notes: "Managed-By: idea-asana-sync\nID: BI-005\nidea: https://example.com",
+      }),
+      true,
+    );
+  });
+
+  it("detects legacy managed tasks from the structured notes", () => {
+    assert.equal(
+      isManagedSyncTask({
+        name: "[BI-005] Asana 入口アイディア同期ツール",
+        notes: [
+          "ID: BI-005",
+          "要約",
+          "idea: https://example.com/idea",
+          "notes: https://example.com/notes",
+          "handoff: https://example.com/handoff",
+        ].join("\n"),
+      }),
+      true,
+    );
+  });
+
+  it("ignores prefix-only tasks without ownership evidence", () => {
+    assert.equal(
+      isManagedSyncTask({
+        name: "[BI-005] 手動で作った task",
+        notes: "ID: BI-005\n雑メモだけある",
+      }),
+      false,
+    );
   });
 });
 
@@ -214,5 +271,74 @@ describe("paginateAsanaCollection", () => {
 
     const items = await paginateAsanaCollection(asana, "/projects/123/sections");
     assert.deepEqual(items, [{ gid: "only" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// planTaskReconciliation
+// ---------------------------------------------------------------------------
+describe("planTaskReconciliation", () => {
+  it("keeps the oldest managed task, removes duplicates, and removes orphaned synced tasks", () => {
+    const tasks = [
+      {
+        gid: "newer-1",
+        name: "[BI-001] Alpha",
+        created_at: "2026-04-12T00:00:00.000Z",
+        notes: "Managed-By: idea-asana-sync\nID: BI-001",
+      },
+      {
+        gid: "older-1",
+        name: "[BI-001] Alpha duplicate",
+        created_at: "2026-04-01T00:00:00.000Z",
+        notes: "Managed-By: idea-asana-sync\nID: BI-001",
+      },
+      {
+        gid: "keep-2",
+        name: "[BI-002] Beta",
+        created_at: "2026-04-03T00:00:00.000Z",
+        notes: "Managed-By: idea-asana-sync\nID: BI-002",
+      },
+      {
+        gid: "orphan-1",
+        name: "[BI-999] Old project",
+        created_at: "2026-03-01T00:00:00.000Z",
+        notes: "Managed-By: idea-asana-sync\nID: BI-999",
+      },
+      { gid: "manual-1", name: "手動メモ task" },
+      {
+        gid: "manual-prefixed",
+        name: "[BI-003] 人手管理 task",
+        created_at: "2026-04-10T00:00:00.000Z",
+        notes: "ID: BI-003\n手動メモ",
+      },
+    ];
+    const ideas = [{ id: "BI-001" }, { id: "BI-002" }, { id: "BI-003" }];
+
+    const plan = planTaskReconciliation(tasks, ideas);
+
+    assert.equal(plan.existingTaskByIdeaId.get("BI-001")?.gid, "older-1");
+    assert.equal(plan.existingTaskByIdeaId.get("BI-002")?.gid, "keep-2");
+    assert.equal(plan.existingTaskByIdeaId.has("BI-003"), false);
+    assert.deepEqual(
+      plan.duplicateTasksToRemove.map((task) => task.gid),
+      ["newer-1"],
+    );
+    assert.deepEqual(
+      plan.orphanedTasksToRemove.map((task) => task.gid),
+      ["orphan-1"],
+    );
+  });
+
+  it("ignores non-synced tasks when deciding removals", () => {
+    const tasks = [
+      { gid: "manual-1", name: "Manual follow-up" },
+      { gid: "manual-2", name: "[misc] something else" },
+    ];
+
+    const plan = planTaskReconciliation(tasks, [{ id: "BI-001" }]);
+
+    assert.equal(plan.existingTaskByIdeaId.size, 0);
+    assert.deepEqual(plan.duplicateTasksToRemove, []);
+    assert.deepEqual(plan.orphanedTasksToRemove, []);
   });
 });

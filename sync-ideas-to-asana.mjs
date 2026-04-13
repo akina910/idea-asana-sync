@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 const ASANA_BASE_URL = "https://app.asana.com/api/1.0";
 const DEFAULT_SOURCE_REPO_PATH = path.resolve("./source-bussines-idea");
 const DEFAULT_SOURCE_REPO_URL = "https://github.com/akina910/bussines_idea";
+const SYNCED_TASK_NAME_PATTERN = /^\[(BI-\d+)\]\s+/;
+const TASK_MANAGED_MARKER = "Managed-By: idea-asana-sync";
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
@@ -15,21 +17,11 @@ async function main() {
   const indexMarkdown = await fs.readFile(indexPath, "utf8");
   const rows = parseIndexTable(indexMarkdown);
   const ideas = await Promise.all(rows.map((row) => hydrateIdea(row, config)));
-
-  if (dryRun) {
-    const dryRunOutput = ideas.map((idea) => ({
-      ...idea,
-      _section: config.useStatusSections ? (idea.status || "未分類") : (config.sectionName || null),
-    }));
-    process.stdout.write(`${JSON.stringify(dryRunOutput, null, 2)}\n`);
-    return;
-  }
-
-  const asana = createAsanaClient(config.asanaToken);
   const projectGid = extractProjectGidFromUrl(config.projectUrl);
-  if (!projectGid) {
+  if (!dryRun && !projectGid) {
     throw new Error("ASANA_PROJECT_URL から project GID を読めませんでした。");
   }
+  const asana = config.asanaToken ? createAsanaClient(config.asanaToken) : null;
 
   // sectionGid cache: status (or fixed name) → gid
   const sectionCache = new Map();
@@ -50,12 +42,57 @@ async function main() {
     return null;
   }
 
-  const tasks = await listProjectTasks(asana, projectGid);
+  let existingTaskByIdeaId = new Map();
+  let duplicateTasksToRemove = [];
+  let orphanedTasksToRemove = [];
+  let reconciliationPreview = {
+    available: false,
+    reason: explainReconciliationUnavailable({ hasToken: Boolean(config.asanaToken), projectGid }),
+    orphanedTasksToRemove: [],
+    duplicateTasksToRemove: [],
+  };
+
+  if (asana && projectGid) {
+    const tasks = await listProjectTasks(asana, projectGid);
+    const reconciliationPlan = planTaskReconciliation(tasks, ideas);
+    existingTaskByIdeaId = reconciliationPlan.existingTaskByIdeaId;
+    duplicateTasksToRemove = reconciliationPlan.duplicateTasksToRemove;
+    orphanedTasksToRemove = reconciliationPlan.orphanedTasksToRemove;
+    reconciliationPreview = {
+      available: true,
+      orphanedTasksToRemove: orphanedTasksToRemove.map(serializeTaskPreview),
+      duplicateTasksToRemove: duplicateTasksToRemove.map(serializeTaskPreview),
+    };
+  }
+
+  if (dryRun) {
+    const dryRunOutput = {
+      projectGid,
+      ideas: ideas.map((idea) => ({
+        ...idea,
+        _section: config.useStatusSections ? (idea.status || "未分類") : (config.sectionName || null),
+        _taskAction: existingTaskByIdeaId.has(idea.id) ? "updated" : "created",
+      })),
+      reconciliation: reconciliationPreview,
+    };
+    process.stdout.write(`${JSON.stringify(dryRunOutput, null, 2)}\n`);
+    return;
+  }
 
   const results = [];
+  for (const task of orphanedTasksToRemove) {
+    await removeTaskFromProject(asana, task.gid, projectGid);
+    results.push({ action: "removed-missing", taskGid: task.gid, taskName: task.name });
+  }
+
+  for (const task of duplicateTasksToRemove) {
+    await removeTaskFromProject(asana, task.gid, projectGid);
+    results.push({ action: "removed-duplicate", taskGid: task.gid, taskName: task.name });
+  }
+
   for (const idea of ideas) {
     const targetSectionGid = await resolveSectionGid(idea);
-    const existing = tasks.find((task) => task.name.startsWith(`[${idea.id}] `));
+    const existing = existingTaskByIdeaId.get(idea.id);
     if (existing) {
       await updateTask(asana, existing.gid, idea);
       if (targetSectionGid) {
@@ -199,12 +236,106 @@ export function truncateNextAction(text) {
   return `${text.slice(0, NEXT_ACTION_MAX_LEN - NEXT_ACTION_SUFFIX.length)}${NEXT_ACTION_SUFFIX}`;
 }
 
+export function extractIdeaIdFromTaskName(taskName) {
+  return taskName?.match(SYNCED_TASK_NAME_PATTERN)?.[1] || null;
+}
+
+export function isManagedSyncTask(task) {
+  const ideaId = extractIdeaIdFromTaskName(task.name);
+  if (!ideaId || !task.notes) {
+    return false;
+  }
+
+  if (task.notes.includes(TASK_MANAGED_MARKER)) {
+    return true;
+  }
+
+  return (
+    task.notes.includes(`ID: ${ideaId}`) &&
+    task.notes.includes("\nidea: ") &&
+    task.notes.includes("\nnotes: ") &&
+    task.notes.includes("\nhandoff: ")
+  );
+}
+
+function compareTasksForRetention(a, b) {
+  const createdAtDiff = getTaskCreatedAtTimestamp(a) - getTaskCreatedAtTimestamp(b);
+  if (createdAtDiff !== 0) {
+    return createdAtDiff;
+  }
+
+  return String(a.gid).localeCompare(String(b.gid));
+}
+
+function getTaskCreatedAtTimestamp(task) {
+  const timestamp = Date.parse(task.created_at || "");
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp;
+}
+
+export function planTaskReconciliation(tasks, ideas) {
+  const sourceIdeaIds = new Set(ideas.map((idea) => idea.id));
+  const existingTaskByIdeaId = new Map();
+  const duplicateTasksToRemove = [];
+  const orphanedTasksToRemove = [];
+
+  for (const task of tasks) {
+    const ideaId = extractIdeaIdFromTaskName(task.name);
+    if (!ideaId || !isManagedSyncTask(task)) {
+      continue;
+    }
+
+    if (!sourceIdeaIds.has(ideaId)) {
+      orphanedTasksToRemove.push(task);
+      continue;
+    }
+
+    if (existingTaskByIdeaId.has(ideaId)) {
+      const currentTask = existingTaskByIdeaId.get(ideaId);
+      const keeper = compareTasksForRetention(currentTask, task) <= 0 ? currentTask : task;
+      const duplicate = keeper === currentTask ? task : currentTask;
+      existingTaskByIdeaId.set(ideaId, keeper);
+      duplicateTasksToRemove.push(duplicate);
+      continue;
+    }
+
+    existingTaskByIdeaId.set(ideaId, task);
+  }
+
+  return {
+    existingTaskByIdeaId,
+    duplicateTasksToRemove,
+    orphanedTasksToRemove,
+  };
+}
+
+function explainReconciliationUnavailable({ hasToken, projectGid }) {
+  if (!hasToken && !projectGid) {
+    return "ASANA_ACCESS_TOKEN と ASANA_PROJECT_URL が未設定のため、既存 task の削除候補は計算できません。";
+  }
+  if (!hasToken) {
+    return "ASANA_ACCESS_TOKEN が未設定のため、既存 task の削除候補は計算できません。";
+  }
+  if (!projectGid) {
+    return "ASANA_PROJECT_URL から project GID を解決できないため、既存 task の削除候補は計算できません。";
+  }
+  return null;
+}
+
+function serializeTaskPreview(task) {
+  return {
+    gid: task.gid,
+    name: task.name,
+    created_at: task.created_at || null,
+  };
+}
+
 function buildTaskNotes(idea, config) {
   const ideaUrl = `${config.sourceRepoUrl}/blob/main/${idea.ideaPath}`;
   const notesUrl = `${config.sourceRepoUrl}/blob/main/${idea.notesPath}`;
   const handoffUrl = `${config.sourceRepoUrl}/blob/main/${idea.handoffPath}`;
 
   return [
+    TASK_MANAGED_MARKER,
     `ID: ${idea.id}`,
     `タイプ: ${idea.type}`,
     `状態: ${idea.status}`,
@@ -253,7 +384,7 @@ function createAsanaClient(token) {
 
 async function listProjectTasks(asana, projectGid) {
   return paginateAsanaCollection(asana, `/projects/${projectGid}/tasks`, {
-    query: { opt_fields: "gid,name,completed", limit: 100 },
+    query: { opt_fields: "gid,name,completed,created_at,notes", limit: 100 },
   });
 }
 
@@ -321,6 +452,12 @@ async function updateTask(asana, taskGid, idea) {
 async function addTaskToSection(asana, sectionGid, taskGid) {
   await asana("POST", `/sections/${sectionGid}/addTask`, {
     body: { task: taskGid },
+  });
+}
+
+async function removeTaskFromProject(asana, taskGid, projectGid) {
+  await asana("POST", `/tasks/${taskGid}/removeProject`, {
+    body: { project: projectGid },
   });
 }
 
