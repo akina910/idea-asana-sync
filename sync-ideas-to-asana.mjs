@@ -73,7 +73,12 @@ async function main() {
       ideas: ideas.map((idea) => ({
         ...idea,
         _section: config.useStatusSections ? (idea.status || "未分類") : (config.sectionName || null),
-        _taskAction: existingTaskByIdeaId.has(idea.id) ? "updated" : "created",
+        _taskAction: describeDryRunTaskAction(existingTaskByIdeaId.get(idea.id), idea),
+        _sectionAction: describeDryRunSectionAction(
+          existingTaskByIdeaId.get(idea.id),
+          projectGid,
+          config.useStatusSections ? (idea.status || "未分類") : config.sectionName,
+        ),
       })),
       reconciliation: reconciliationPreview,
     };
@@ -96,11 +101,24 @@ async function main() {
     const targetSectionGid = await resolveSectionGid(idea);
     const existing = existingTaskByIdeaId.get(idea.id);
     if (existing) {
-      await updateTask(asana, existing.gid, idea);
-      if (targetSectionGid) {
+      const needsContentUpdate = !areTaskContentsEqual(existing, idea);
+      const needsSectionUpdate = targetSectionGid
+        ? getTaskSectionGid(existing, projectGid) !== targetSectionGid
+        : false;
+
+      if (needsContentUpdate) {
+        await updateTask(asana, existing.gid, idea);
+      }
+      if (needsSectionUpdate) {
         await addTaskToSection(asana, targetSectionGid, existing.gid);
       }
-      results.push({ action: "updated", id: idea.id, taskGid: existing.gid });
+      results.push({
+        action: needsContentUpdate || needsSectionUpdate ? "updated" : "unchanged",
+        id: idea.id,
+        taskGid: existing.gid,
+        contentUpdated: needsContentUpdate,
+        sectionUpdated: needsSectionUpdate,
+      });
       continue;
     }
 
@@ -195,16 +213,29 @@ function stripCode(value) {
   return value.replace(/^`|`$/g, "");
 }
 
-async function hydrateIdea(row, config) {
-  const ideaMarkdown = await fs.readFile(path.join(config.sourceRepoPath, row.ideaPath), "utf8");
-  const summary = extractSection(ideaMarkdown, "一言") || row.oneLine;
+export async function hydrateIdea(row, config) {
+  const ideaMarkdown = await readOptionalSourceFile(config.sourceRepoPath, row.ideaPath);
+  const summary = ideaMarkdown ? (extractSection(ideaMarkdown, "一言") || row.oneLine) : row.oneLine;
 
   return {
     ...row,
     summary,
     taskName: `[${row.id}] ${row.title}`,
     notes: buildTaskNotes({ ...row, summary }, config),
+    sourceFileMissing: !ideaMarkdown,
   };
+}
+
+async function readOptionalSourceFile(sourceRepoPath, repoPath) {
+  try {
+    return await fs.readFile(path.join(sourceRepoPath, repoPath), "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      console.warn(`[warn] source idea file is missing; using project-index row fallback: ${repoPath}`);
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function extractSection(markdown, heading) {
@@ -308,6 +339,48 @@ export function planTaskReconciliation(tasks, ideas) {
     duplicateTasksToRemove,
     orphanedTasksToRemove,
   };
+}
+
+export function areTaskContentsEqual(task, idea) {
+  return task?.name === idea.taskName && task?.notes === idea.notes;
+}
+
+export function getTaskSectionGid(task, projectGid) {
+  if (!task?.memberships || !projectGid) {
+    return null;
+  }
+
+  const membership = task.memberships.find((item) => item.project?.gid === projectGid);
+  return membership?.section?.gid || null;
+}
+
+function getTaskSectionName(task, projectGid) {
+  if (!task?.memberships || !projectGid) {
+    return null;
+  }
+
+  const membership = task.memberships.find((item) => item.project?.gid === projectGid);
+  return membership?.section?.name || null;
+}
+
+function describeDryRunTaskAction(existingTask, idea) {
+  if (!existingTask) {
+    return "created";
+  }
+
+  return areTaskContentsEqual(existingTask, idea) ? "unchanged" : "updated";
+}
+
+function describeDryRunSectionAction(existingTask, projectGid, targetSectionName) {
+  if (!targetSectionName) {
+    return null;
+  }
+
+  if (!existingTask) {
+    return "assigned";
+  }
+
+  return getTaskSectionName(existingTask, projectGid) === targetSectionName ? "unchanged" : "moved";
 }
 
 function explainReconciliationUnavailable({ hasToken, projectGid }) {
@@ -424,7 +497,10 @@ function createAsanaClient(token) {
 
 async function listProjectTasks(asana, projectGid) {
   return paginateAsanaCollection(asana, `/projects/${projectGid}/tasks`, {
-    query: { opt_fields: "gid,name,completed,created_at,notes", limit: 100 },
+    query: {
+      opt_fields: "gid,name,completed,created_at,notes,memberships.project.gid,memberships.section.gid,memberships.section.name",
+      limit: 100,
+    },
   });
 }
 

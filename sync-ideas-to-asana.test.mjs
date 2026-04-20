@@ -1,9 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  areTaskContentsEqual,
   buildSourceRepoFileUrl,
   buildTaskNotes,
   extractProjectGidFromUrl,
+  getTaskSectionGid,
+  hydrateIdea,
   parseIndexTable,
   extractSection,
   extractIdeaIdFromTaskName,
@@ -37,6 +40,51 @@ describe("extractProjectGidFromUrl", () => {
 
   it("returns null for a URL without a numeric GID", () => {
     assert.equal(extractProjectGidFromUrl("https://app.asana.com/home"), null);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// hydrateIdea
+// ---------------------------------------------------------------------------
+describe("hydrateIdea", () => {
+  it("falls back to the project-index summary when the source idea file is missing", async () => {
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (message) => {
+      warnings.push(message);
+    };
+
+    try {
+      const idea = await hydrateIdea(
+        {
+          id: "BI-074",
+          title: "AI Search Visibility Console",
+          type: "External",
+          status: "分離済み",
+          implementation: "未着手",
+          splitRepo: "ai-search-visibility-console",
+          oneLine: "AI検索での露出を可視化するSaaS。",
+          nextAction: "MVPを切る",
+          ideaPath: "ideas/BI-074-ai-search-visibility-console.md",
+          notesPath: "—",
+          handoffPath: "—",
+        },
+        {
+          sourceRepoPath: "/tmp/idea-asana-sync-missing-source",
+          sourceRepoUrl: "https://github.com/example/repo",
+        },
+      );
+
+      assert.equal(idea.summary, "AI検索での露出を可視化するSaaS。");
+      assert.equal(idea.sourceFileMissing, true);
+      assert.match(idea.notes, /AI検索での露出を可視化するSaaS。/);
+      assert.deepEqual(warnings, [
+        "[warn] source idea file is missing; using project-index row fallback: ideas/BI-074-ai-search-visibility-console.md",
+      ]);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });
 
@@ -127,6 +175,92 @@ describe("buildTaskNotes", () => {
 
     assert.match(notes, /\nnotes: https:\/\/github\.com\/example\/repo\/blob\/main\/notes\/BI-005\.md/);
     assert.match(notes, /\nhandoff: https:\/\/github\.com\/example\/repo\/blob\/main\/handoff\/BI-005\.md/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// areTaskContentsEqual / getTaskSectionGid
+// ---------------------------------------------------------------------------
+describe("areTaskContentsEqual", () => {
+  it("returns true when both name and notes already match the desired task", () => {
+    const idea = {
+      taskName: "[BI-005] Asana 入口アイディア同期ツール",
+      notes: "Managed-By: idea-asana-sync\nID: BI-005",
+    };
+
+    assert.equal(
+      areTaskContentsEqual(
+        {
+          name: "[BI-005] Asana 入口アイディア同期ツール",
+          notes: "Managed-By: idea-asana-sync\nID: BI-005",
+        },
+        idea,
+      ),
+      true,
+    );
+  });
+
+  it("returns false when either name or notes differ", () => {
+    const idea = {
+      taskName: "[BI-005] Asana 入口アイディア同期ツール",
+      notes: "Managed-By: idea-asana-sync\nID: BI-005",
+    };
+
+    assert.equal(
+      areTaskContentsEqual(
+        {
+          name: "[BI-005] 別名タスク",
+          notes: "Managed-By: idea-asana-sync\nID: BI-005",
+        },
+        idea,
+      ),
+      false,
+    );
+    assert.equal(
+      areTaskContentsEqual(
+        {
+          name: "[BI-005] Asana 入口アイディア同期ツール",
+          notes: "別の本文",
+        },
+        idea,
+      ),
+      false,
+    );
+  });
+});
+
+describe("getTaskSectionGid", () => {
+  it("returns the section gid for the target project membership", () => {
+    const sectionGid = getTaskSectionGid(
+      {
+        memberships: [
+          {
+            project: { gid: "other-project" },
+            section: { gid: "other-section" },
+          },
+          {
+            project: { gid: "target-project" },
+            section: { gid: "target-section" },
+          },
+        ],
+      },
+      "target-project",
+    );
+
+    assert.equal(sectionGid, "target-section");
+  });
+
+  it("returns null when the task is not in the target project or section is absent", () => {
+    assert.equal(getTaskSectionGid({ memberships: [] }, "target-project"), null);
+    assert.equal(
+      getTaskSectionGid(
+        {
+          memberships: [{ project: { gid: "target-project" } }],
+        },
+        "target-project",
+      ),
+      null,
+    );
   });
 });
 
