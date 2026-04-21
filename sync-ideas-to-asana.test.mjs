@@ -5,14 +5,18 @@ import {
   buildSourceRepoFileUrl,
   buildTaskNotes,
   extractProjectGidFromUrl,
+  normalizeSectionName,
+  parseBooleanFlag,
   getTaskSectionGid,
   hydrateIdea,
   parseIndexTable,
+  parseStatusSectionMap,
   extractSection,
   extractIdeaIdFromTaskName,
   isManagedSyncTask,
   paginateAsanaCollection,
   planTaskReconciliation,
+  resolveTargetSectionName,
   truncateNextAction,
 } from "./sync-ideas-to-asana.mjs";
 
@@ -40,6 +44,97 @@ describe("extractProjectGidFromUrl", () => {
 
   it("returns null for a URL without a numeric GID", () => {
     assert.equal(extractProjectGidFromUrl("https://app.asana.com/home"), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section config helpers
+// ---------------------------------------------------------------------------
+describe("parseBooleanFlag", () => {
+  it("accepts common truthy values", () => {
+    assert.equal(parseBooleanFlag("true"), true);
+    assert.equal(parseBooleanFlag("TRUE"), true);
+    assert.equal(parseBooleanFlag("1"), true);
+    assert.equal(parseBooleanFlag(" yes "), true);
+    assert.equal(parseBooleanFlag("On"), true);
+  });
+
+  it("returns false for non-truthy values", () => {
+    assert.equal(parseBooleanFlag("false"), false);
+    assert.equal(parseBooleanFlag("0"), false);
+    assert.equal(parseBooleanFlag(""), false);
+    assert.equal(parseBooleanFlag(undefined), false);
+    assert.equal(parseBooleanFlag(null), false);
+  });
+});
+
+describe("normalizeSectionName", () => {
+  it("trims and collapses internal whitespace", () => {
+    assert.equal(normalizeSectionName("  着手中   （要確認）  "), "着手中 （要確認）");
+  });
+
+  it("falls back when input is empty", () => {
+    assert.equal(normalizeSectionName("   "), "未分類");
+  });
+
+  it("can use custom fallback", () => {
+    assert.equal(normalizeSectionName("", { fallback: null }), null);
+  });
+});
+
+describe("parseStatusSectionMap", () => {
+  it("parses a JSON object and normalizes keys/values", () => {
+    const map = parseStatusSectionMap('{"  手動ローンチ実行待ち ":" 要対応 ","分離済み":"完了"}');
+    assert.equal(map.get("手動ローンチ実行待ち"), "要対応");
+    assert.equal(map.get("分離済み"), "完了");
+  });
+
+  it("returns an empty map for empty input", () => {
+    assert.equal(parseStatusSectionMap("").size, 0);
+    assert.equal(parseStatusSectionMap(undefined).size, 0);
+  });
+
+  it("throws for non-object JSON", () => {
+    assert.throws(() => parseStatusSectionMap("[]"), /JSON オブジェクト/);
+    assert.throws(() => parseStatusSectionMap('"text"'), /JSON オブジェクト/);
+  });
+});
+
+describe("resolveTargetSectionName", () => {
+  it("uses mapped section name when status-sections mode is enabled", () => {
+    const section = resolveTargetSectionName(
+      { status: "手動ローンチ実行待ち" },
+      {
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map([["手動ローンチ実行待ち", "要対応"]]),
+      },
+    );
+    assert.equal(section, "要対応");
+  });
+
+  it("falls back to normalized status when no map entry exists", () => {
+    const section = resolveTargetSectionName(
+      { status: "  分離済み " },
+      {
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+      },
+    );
+    assert.equal(section, "分離済み");
+  });
+
+  it("uses fixed section in legacy mode", () => {
+    const section = resolveTargetSectionName(
+      { status: "分離済み" },
+      {
+        useStatusSections: false,
+        sectionName: "入口",
+        statusSectionMap: new Map(),
+      },
+    );
+    assert.equal(section, "入口");
   });
 });
 

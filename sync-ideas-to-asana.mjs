@@ -9,6 +9,8 @@ const DEFAULT_SOURCE_REPO_PATH = path.resolve("./source-bussines-idea");
 const DEFAULT_SOURCE_REPO_URL = "https://github.com/akina910/bussines_idea";
 const SYNCED_TASK_NAME_PATTERN = /^\[(BI-\d+)\]\s+/;
 const TASK_MANAGED_MARKER = "Managed-By: idea-asana-sync";
+const STATUS_SECTION_FALLBACK_NAME = "未分類";
+const TRUE_BOOLEAN_VALUES = new Set(["1", "true", "yes", "on"]);
 const SOURCE_REPO_ALLOWED_PATH_PREFIXES = ["ideas/", "notes/", "handoff/"];
 const SOURCE_REPO_KNOWN_PLACEHOLDERS = new Set(["-", "—", "–", "未作成", "未設定", "N/A", "n/a"]);
 
@@ -25,23 +27,18 @@ async function main() {
   }
   const asana = config.asanaToken ? createAsanaClient(config.asanaToken) : null;
 
-  // sectionGid cache: status (or fixed name) → gid
+  // sectionGid cache: normalized section name → gid
   const sectionCache = new Map();
   async function resolveSectionGid(idea) {
-    if (config.useStatusSections) {
-      const key = idea.status || "未分類";
-      if (!sectionCache.has(key)) {
-        sectionCache.set(key, await ensureSection(asana, projectGid, key));
-      }
-      return sectionCache.get(key);
+    const targetSectionName = resolveTargetSectionName(idea, config);
+    if (!targetSectionName) {
+      return null;
     }
-    if (config.sectionName) {
-      if (!sectionCache.has(config.sectionName)) {
-        sectionCache.set(config.sectionName, await ensureSection(asana, projectGid, config.sectionName));
-      }
-      return sectionCache.get(config.sectionName);
+
+    if (!sectionCache.has(targetSectionName)) {
+      sectionCache.set(targetSectionName, await ensureSection(asana, projectGid, targetSectionName));
     }
-    return null;
+    return sectionCache.get(targetSectionName);
   }
 
   let existingTaskByIdeaId = new Map();
@@ -72,12 +69,12 @@ async function main() {
       projectGid,
       ideas: ideas.map((idea) => ({
         ...idea,
-        _section: config.useStatusSections ? (idea.status || "未分類") : (config.sectionName || null),
+        _section: resolveTargetSectionName(idea, config),
         _taskAction: describeDryRunTaskAction(existingTaskByIdeaId.get(idea.id), idea),
         _sectionAction: describeDryRunSectionAction(
           existingTaskByIdeaId.get(idea.id),
           projectGid,
-          config.useStatusSections ? (idea.status || "未分類") : config.sectionName,
+          resolveTargetSectionName(idea, config),
         ),
       })),
       reconciliation: reconciliationPreview,
@@ -141,11 +138,27 @@ function loadConfig({ dryRun }) {
     throw new Error("ASANA_PROJECT_URL が必要です。");
   }
 
+  const sectionName = normalizeSectionName(process.env.ASANA_SECTION_NAME, { fallback: null });
+  const useStatusSections = parseBooleanFlag(process.env.ASANA_USE_STATUS_SECTIONS);
+  const statusSectionMap = parseStatusSectionMap(process.env.ASANA_STATUS_SECTION_MAP_JSON);
+
+  if (useStatusSections && sectionName) {
+    console.warn(
+      "[warn] ASANA_USE_STATUS_SECTIONS が有効なため ASANA_SECTION_NAME は無視されます。",
+    );
+  }
+  if (!useStatusSections && statusSectionMap.size > 0) {
+    console.warn(
+      "[warn] ASANA_STATUS_SECTION_MAP_JSON は ASANA_USE_STATUS_SECTIONS=true のときのみ有効です。",
+    );
+  }
+
   return {
     asanaToken,
     projectUrl,
-    sectionName: process.env.ASANA_SECTION_NAME || null,
-    useStatusSections: process.env.ASANA_USE_STATUS_SECTIONS === "true",
+    sectionName,
+    useStatusSections,
+    statusSectionMap,
     sourceRepoPath:
       process.env.SOURCE_REPO_PATH ||
       process.env.BUSSINES_IDEA_REPO_PATH ||
@@ -157,6 +170,65 @@ function loadConfig({ dryRun }) {
         DEFAULT_SOURCE_REPO_URL
       ).replace(/\/$/, ""),
   };
+}
+
+export function parseBooleanFlag(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  return TRUE_BOOLEAN_VALUES.has(value.trim().toLowerCase());
+}
+
+export function normalizeSectionName(sectionName, { fallback = STATUS_SECTION_FALLBACK_NAME } = {}) {
+  if (typeof sectionName !== "string") {
+    return fallback;
+  }
+
+  const normalized = sectionName.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return fallback;
+  }
+
+  return normalized;
+}
+
+export function parseStatusSectionMap(rawJson) {
+  if (!rawJson || !rawJson.trim()) {
+    return new Map();
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    throw new Error("ASANA_STATUS_SECTION_MAP_JSON は JSON オブジェクトで指定してください。");
+  }
+
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("ASANA_STATUS_SECTION_MAP_JSON は JSON オブジェクトで指定してください。");
+  }
+
+  const statusSectionMap = new Map();
+  for (const [status, sectionName] of Object.entries(parsed)) {
+    const normalizedStatus = normalizeSectionName(status, { fallback: null });
+    const normalizedSectionName = normalizeSectionName(sectionName, { fallback: null });
+    if (!normalizedStatus || !normalizedSectionName) {
+      continue;
+    }
+    statusSectionMap.set(normalizedStatus, normalizedSectionName);
+  }
+
+  return statusSectionMap;
+}
+
+export function resolveTargetSectionName(idea, config) {
+  if (config.useStatusSections) {
+    const normalizedStatus = normalizeSectionName(idea?.status);
+    return config.statusSectionMap?.get(normalizedStatus) || normalizedStatus;
+  }
+
+  return config.sectionName || null;
 }
 
 export function extractProjectGidFromUrl(projectUrl) {
