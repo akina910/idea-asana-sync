@@ -4,7 +4,9 @@ import {
   areTaskContentsEqual,
   buildSourceRepoFileUrl,
   buildTaskNotes,
+  createSectionResolver,
   extractProjectGidFromUrl,
+  formatTaskFieldValue,
   normalizeSectionName,
   parseBooleanFlag,
   getTaskSectionGid,
@@ -270,6 +272,44 @@ describe("buildTaskNotes", () => {
 
     assert.match(notes, /\nnotes: https:\/\/github\.com\/example\/repo\/blob\/main\/notes\/BI-005\.md/);
     assert.match(notes, /\nhandoff: https:\/\/github\.com\/example\/repo\/blob\/main\/handoff\/BI-005\.md/);
+  });
+
+  it("normalizes missing and placeholder values to avoid undefined in task body", () => {
+    const notes = buildTaskNotes(
+      {
+        ...baseIdea,
+        type: undefined,
+        status: "-",
+        implementation: "  ",
+        splitRepo: "—",
+        summary: "",
+        nextAction: undefined,
+        notesPath: "—",
+        handoffPath: "—",
+      },
+      config,
+    );
+
+    assert.match(notes, /タイプ: 未設定/);
+    assert.match(notes, /状態: 未設定/);
+    assert.match(notes, /実装: 未設定/);
+    assert.match(notes, /分離repo: 未設定/);
+    assert.match(notes, /\n要約\n未設定\n/);
+    assert.match(notes, /次アクション: 未設定/);
+    assert.doesNotMatch(notes, /undefined/);
+  });
+});
+
+describe("formatTaskFieldValue", () => {
+  it("returns normalized text for regular values", () => {
+    assert.equal(formatTaskFieldValue("  手動 対応  "), "手動 対応");
+  });
+
+  it("returns fallback for placeholders and non-string input", () => {
+    assert.equal(formatTaskFieldValue(" - "), "未設定");
+    assert.equal(formatTaskFieldValue("未作成"), "未設定");
+    assert.equal(formatTaskFieldValue(undefined), "未設定");
+    assert.equal(formatTaskFieldValue("", { fallback: "なし" }), "なし");
   });
 });
 
@@ -592,6 +632,47 @@ describe("paginateAsanaCollection", () => {
 
     const items = await paginateAsanaCollection(asana, "/projects/123/sections");
     assert.deepEqual(items, [{ gid: "only" }]);
+  });
+});
+
+describe("createSectionResolver", () => {
+  it("loads sections once and reuses cache for existing and newly-created sections", async () => {
+    const calls = [];
+    const asana = async (method, endpoint, { query, body } = {}) => {
+      calls.push({ method, endpoint, query, body });
+      if (method === "GET" && endpoint === "/projects/proj-1/sections") {
+        return {
+          data: [{ gid: "sec-existing", name: "分離済み" }],
+          next_page: null,
+        };
+      }
+      if (method === "POST" && endpoint === "/projects/proj-1/sections") {
+        return {
+          data: { gid: "sec-created", name: body.name },
+        };
+      }
+      throw new Error("unexpected call");
+    };
+
+    const resolveSectionGid = createSectionResolver(asana, "proj-1");
+    const existing1 = await resolveSectionGid("分離済み");
+    const existing2 = await resolveSectionGid("分離済み");
+    const created1 = await resolveSectionGid("着手中");
+    const created2 = await resolveSectionGid("着手中");
+
+    assert.equal(existing1, "sec-existing");
+    assert.equal(existing2, "sec-existing");
+    assert.equal(created1, "sec-created");
+    assert.equal(created2, "sec-created");
+
+    assert.equal(
+      calls.filter((call) => call.method === "GET" && call.endpoint === "/projects/proj-1/sections").length,
+      1,
+    );
+    assert.equal(
+      calls.filter((call) => call.method === "POST" && call.endpoint === "/projects/proj-1/sections").length,
+      1,
+    );
   });
 });
 

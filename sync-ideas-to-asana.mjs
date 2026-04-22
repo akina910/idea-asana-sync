@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ASANA_BASE_URL = "https://app.asana.com/api/1.0";
 const DEFAULT_SOURCE_REPO_PATH = path.resolve("./source-bussines-idea");
+const LOCAL_SOURCE_REPO_FALLBACK_PATH = path.resolve("../bussines_idea");
 const DEFAULT_SOURCE_REPO_URL = "https://github.com/akina910/bussines_idea";
 const SYNCED_TASK_NAME_PATTERN = /^\[(BI-\d+)\]\s+/;
 const TASK_MANAGED_MARKER = "Managed-By: idea-asana-sync";
@@ -13,6 +15,7 @@ const STATUS_SECTION_FALLBACK_NAME = "未分類";
 const TRUE_BOOLEAN_VALUES = new Set(["1", "true", "yes", "on"]);
 const SOURCE_REPO_ALLOWED_PATH_PREFIXES = ["ideas/", "notes/", "handoff/"];
 const SOURCE_REPO_KNOWN_PLACEHOLDERS = new Set(["-", "—", "–", "未作成", "未設定", "N/A", "n/a"]);
+const SOURCE_REPO_INDEX_RELATIVE_PATH = path.join("status", "project-index.md");
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
@@ -27,18 +30,15 @@ async function main() {
   }
   const asana = config.asanaToken ? createAsanaClient(config.asanaToken) : null;
 
-  // sectionGid cache: normalized section name → gid
-  const sectionCache = new Map();
+  const resolveSectionGidByName = asana
+    ? createSectionResolver(asana, projectGid)
+    : async () => null;
   async function resolveSectionGid(idea) {
     const targetSectionName = resolveTargetSectionName(idea, config);
     if (!targetSectionName) {
       return null;
     }
-
-    if (!sectionCache.has(targetSectionName)) {
-      sectionCache.set(targetSectionName, await ensureSection(asana, projectGid, targetSectionName));
-    }
-    return sectionCache.get(targetSectionName);
+    return resolveSectionGidByName(targetSectionName);
   }
 
   let existingTaskByIdeaId = new Map();
@@ -159,10 +159,9 @@ function loadConfig({ dryRun }) {
     sectionName,
     useStatusSections,
     statusSectionMap,
-    sourceRepoPath:
-      process.env.SOURCE_REPO_PATH ||
-      process.env.BUSSINES_IDEA_REPO_PATH ||
-      DEFAULT_SOURCE_REPO_PATH,
+    sourceRepoPath: resolveSourceRepoPath(
+      process.env.SOURCE_REPO_PATH || process.env.BUSSINES_IDEA_REPO_PATH || null,
+    ),
     sourceRepoUrl:
       (
         process.env.SOURCE_REPO_URL ||
@@ -170,6 +169,18 @@ function loadConfig({ dryRun }) {
         DEFAULT_SOURCE_REPO_URL
       ).replace(/\/$/, ""),
   };
+}
+
+export function resolveSourceRepoPath(explicitPath) {
+  if (explicitPath) {
+    return explicitPath;
+  }
+
+  const candidates = [DEFAULT_SOURCE_REPO_PATH, LOCAL_SOURCE_REPO_FALLBACK_PATH];
+  const detected = candidates.find((candidate) =>
+    existsSync(path.join(candidate, SOURCE_REPO_INDEX_RELATIVE_PATH)),
+  );
+  return detected || DEFAULT_SOURCE_REPO_PATH;
 }
 
 export function parseBooleanFlag(value) {
@@ -513,15 +524,15 @@ export function buildTaskNotes(idea, config) {
   const lines = [
     TASK_MANAGED_MARKER,
     `ID: ${idea.id}`,
-    `タイプ: ${idea.type}`,
-    `状態: ${idea.status}`,
-    `実装: ${idea.implementation}`,
-    `分離repo: ${idea.splitRepo}`,
+    `タイプ: ${formatTaskFieldValue(idea.type)}`,
+    `状態: ${formatTaskFieldValue(idea.status)}`,
+    `実装: ${formatTaskFieldValue(idea.implementation)}`,
+    `分離repo: ${formatTaskFieldValue(idea.splitRepo)}`,
     "",
     "要約",
-    idea.summary,
+    formatTaskFieldValue(idea.summary),
     "",
-    `次アクション: ${truncateNextAction(idea.nextAction)}`,
+    `次アクション: ${truncateNextAction(formatTaskFieldValue(idea.nextAction))}`,
     "",
   ];
 
@@ -536,6 +547,23 @@ export function buildTaskNotes(idea, config) {
   }
 
   return lines.join("\n");
+}
+
+export function formatTaskFieldValue(value, { fallback = "未設定" } = {}) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (
+    !normalized ||
+    SOURCE_REPO_KNOWN_PLACEHOLDERS.has(normalized) ||
+    /^[-—–]+$/.test(normalized)
+  ) {
+    return fallback;
+  }
+
+  return normalized;
 }
 
 function createAsanaClient(token) {
@@ -595,21 +623,38 @@ export async function paginateAsanaCollection(asana, endpoint, { query } = {}) {
   return items;
 }
 
-async function ensureSection(asana, projectGid, sectionName) {
-  const sections = await paginateAsanaCollection(asana, `/projects/${projectGid}/sections`, {
-    query: { opt_fields: "gid,name" },
-  });
+export function createSectionResolver(asana, projectGid) {
+  const sectionCache = new Map();
+  let isLoaded = false;
 
-  const existing = sections.find((section) => section.name === sectionName);
-  if (existing) {
-    return existing.gid;
-  }
+  return async (sectionName) => {
+    if (!sectionName) {
+      return null;
+    }
 
-  const created = await asana("POST", `/projects/${projectGid}/sections`, {
-    body: { name: sectionName },
-  });
+    if (!isLoaded) {
+      const sections = await paginateAsanaCollection(asana, `/projects/${projectGid}/sections`, {
+        query: { opt_fields: "gid,name" },
+      });
+      for (const section of sections) {
+        if (section?.name && section?.gid) {
+          sectionCache.set(section.name, section.gid);
+        }
+      }
+      isLoaded = true;
+    }
 
-  return created.data.gid;
+    if (sectionCache.has(sectionName)) {
+      return sectionCache.get(sectionName);
+    }
+
+    const created = await asana("POST", `/projects/${projectGid}/sections`, {
+      body: { name: sectionName },
+    });
+    const sectionGid = created.data.gid;
+    sectionCache.set(sectionName, sectionGid);
+    return sectionGid;
+  };
 }
 
 async function createTask(asana, projectGid, idea, sectionGid) {
