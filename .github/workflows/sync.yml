@@ -34,10 +34,12 @@ jobs:
           ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
           # ASANA_SECTION_NAME: set this secret to place all tasks in a single named section (legacy)
           ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
-          # ASANA_USE_STATUS_SECTIONS: set true/1/yes/on to auto-create sections per project status
-          ASANA_USE_STATUS_SECTIONS: ${{ vars.ASANA_USE_STATUS_SECTIONS }}
+          # ASANA_USE_STATUS_SECTIONS:
+          # - defaults to true (status-based sections enabled)
+          # - set vars/secrets ASANA_USE_STATUS_SECTIONS=false to opt out to legacy single-section mode
+          ASANA_USE_STATUS_SECTIONS: ${{ vars.ASANA_USE_STATUS_SECTIONS || secrets.ASANA_USE_STATUS_SECTIONS || 'true' }}
           # ASANA_STATUS_SECTION_MAP_JSON: optional JSON map, e.g. {"手動ローンチ実行待ち":"要対応","分離済み":"完了"}
-          ASANA_STATUS_SECTION_MAP_JSON: ${{ vars.ASANA_STATUS_SECTION_MAP_JSON }}
+          ASANA_STATUS_SECTION_MAP_JSON: ${{ vars.ASANA_STATUS_SECTION_MAP_JSON || secrets.ASANA_STATUS_SECTION_MAP_JSON }}
           SOURCE_REPO_PATH: ./source-bussines-idea
           SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
         run: node sync-ideas-to-asana.mjs
