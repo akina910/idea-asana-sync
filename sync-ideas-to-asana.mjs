@@ -16,6 +16,7 @@ const TRUE_BOOLEAN_VALUES = new Set(["1", "true", "yes", "on"]);
 const SOURCE_REPO_ALLOWED_PATH_PREFIXES = ["ideas/", "notes/", "handoff/"];
 const SOURCE_REPO_KNOWN_PLACEHOLDERS = new Set(["-", "—", "–", "未作成", "未設定", "N/A", "n/a"]);
 const SOURCE_REPO_INDEX_RELATIVE_PATH = path.join("status", "project-index.md");
+const ASANA_SECTION_NAME_MAX_LEN = 80;
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
@@ -201,6 +202,10 @@ export function normalizeSectionName(sectionName, { fallback = STATUS_SECTION_FA
     return fallback;
   }
 
+  if (normalized.length > ASANA_SECTION_NAME_MAX_LEN) {
+    return `${normalized.slice(0, ASANA_SECTION_NAME_MAX_LEN - 1)}…`;
+  }
+
   return normalized;
 }
 
@@ -236,10 +241,11 @@ export function parseStatusSectionMap(rawJson) {
 export function resolveTargetSectionName(idea, config) {
   if (config.useStatusSections) {
     const normalizedStatus = normalizeSectionName(idea?.status);
-    return config.statusSectionMap?.get(normalizedStatus) || normalizedStatus;
+    const mappedSection = config.statusSectionMap?.get(normalizedStatus);
+    return normalizeSectionName(mappedSection || normalizedStatus);
   }
 
-  return config.sectionName || null;
+  return normalizeSectionName(config.sectionName, { fallback: null });
 }
 
 export function extractProjectGidFromUrl(projectUrl) {

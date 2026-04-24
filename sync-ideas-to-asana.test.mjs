@@ -82,6 +82,13 @@ describe("normalizeSectionName", () => {
   it("can use custom fallback", () => {
     assert.equal(normalizeSectionName("", { fallback: null }), null);
   });
+
+  it("truncates section names longer than 80 characters", () => {
+    const long = "a".repeat(120);
+    const normalized = normalizeSectionName(long);
+    assert.equal(normalized.length, 80);
+    assert.ok(normalized.endsWith("…"));
+  });
 });
 
 describe("parseStatusSectionMap", () => {
@@ -137,6 +144,20 @@ describe("resolveTargetSectionName", () => {
       },
     );
     assert.equal(section, "入口");
+  });
+
+  it("caps long status-derived section names to 80 chars", () => {
+    const longStatus = "手動対応".repeat(30);
+    const section = resolveTargetSectionName(
+      { status: longStatus },
+      {
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+      },
+    );
+    assert.equal(section.length, 80);
+    assert.ok(section.endsWith("…"));
   });
 });
 
