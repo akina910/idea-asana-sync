@@ -8,6 +8,7 @@ import {
   extractProjectGidFromUrl,
   formatTaskFieldValue,
   normalizeSectionName,
+  canonicalizeStatusForSection,
   parseBooleanFlag,
   getTaskSectionGid,
   hydrateIdea,
@@ -139,6 +140,30 @@ describe("resolveTargetSectionName", () => {
     assert.equal(section, "分離済み");
   });
 
+  it("canonicalizes status with suffix details before creating sections", () => {
+    const section = resolveTargetSectionName(
+      { status: "実装完了・デプロイ待ち" },
+      {
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+      },
+    );
+    assert.equal(section, "実装完了");
+  });
+
+  it("supports map lookup with canonicalized status keys", () => {
+    const section = resolveTargetSectionName(
+      { status: "実装完了・デプロイ待ち" },
+      {
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map([["実装完了", "リリース前"]]),
+      },
+    );
+    assert.equal(section, "リリース前");
+  });
+
   it("uses fixed section in legacy mode", () => {
     const section = resolveTargetSectionName(
       { status: "分離済み" },
@@ -163,6 +188,19 @@ describe("resolveTargetSectionName", () => {
     );
     assert.equal(section.length, 80);
     assert.ok(section.endsWith("…"));
+  });
+});
+
+describe("canonicalizeStatusForSection", () => {
+  it("uses the first token before status separators", () => {
+    assert.equal(canonicalizeStatusForSection("実装完了・デプロイ待ち"), "実装完了");
+    assert.equal(canonicalizeStatusForSection("着手中 / 実装中"), "着手中");
+    assert.equal(canonicalizeStatusForSection("運用中｜監視中"), "運用中");
+  });
+
+  it("drops trailing parenthetical notes", () => {
+    assert.equal(canonicalizeStatusForSection("着手中（要確認）"), "着手中");
+    assert.equal(canonicalizeStatusForSection("手動待ち (token rotate)"), "手動待ち");
   });
 });
 

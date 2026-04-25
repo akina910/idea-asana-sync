@@ -243,11 +243,24 @@ export function parseStatusSectionMap(rawJson) {
 export function resolveTargetSectionName(idea, config) {
   if (config.useStatusSections) {
     const normalizedStatus = normalizeSectionName(idea?.status);
-    const mappedSection = config.statusSectionMap?.get(normalizedStatus);
-    return normalizeSectionName(mappedSection || normalizedStatus);
+    const canonicalStatus = canonicalizeStatusForSection(normalizedStatus);
+    const mappedSection =
+      config.statusSectionMap?.get(normalizedStatus) ||
+      config.statusSectionMap?.get(canonicalStatus);
+    return normalizeSectionName(mappedSection || canonicalStatus);
   }
 
   return normalizeSectionName(config.sectionName, { fallback: null });
+}
+
+export function canonicalizeStatusForSection(status) {
+  const normalizedStatus = normalizeSectionName(status);
+  const primaryToken = normalizedStatus
+    .split(/[・|｜/]/)
+    .map((item) => item.trim())
+    .find(Boolean);
+  const withoutTrailingParen = primaryToken?.replace(/\s*[（(][^）)]*[）)]\s*$/, "");
+  return normalizeSectionName(withoutTrailingParen || normalizedStatus);
 }
 
 export function extractProjectGidFromUrl(projectUrl) {
