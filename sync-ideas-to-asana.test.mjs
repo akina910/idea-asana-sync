@@ -68,6 +68,11 @@ describe("parseBooleanFlag", () => {
     assert.equal(parseBooleanFlag(undefined), false);
     assert.equal(parseBooleanFlag(null), false);
   });
+
+  it("supports overriding the default for missing env values", () => {
+    assert.equal(parseBooleanFlag(undefined, { defaultValue: true }), true);
+    assert.equal(parseBooleanFlag(null, { defaultValue: true }), true);
+  });
 });
 
 describe("normalizeSectionName", () => {

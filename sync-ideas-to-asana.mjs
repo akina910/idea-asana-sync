@@ -140,7 +140,9 @@ function loadConfig({ dryRun }) {
   }
 
   const sectionName = normalizeSectionName(process.env.ASANA_SECTION_NAME, { fallback: null });
-  const useStatusSections = parseBooleanFlag(process.env.ASANA_USE_STATUS_SECTIONS);
+  const useStatusSections = parseBooleanFlag(process.env.ASANA_USE_STATUS_SECTIONS, {
+    defaultValue: true,
+  });
   const statusSectionMap = parseStatusSectionMap(process.env.ASANA_STATUS_SECTION_MAP_JSON);
 
   if (useStatusSections && sectionName) {
@@ -184,9 +186,9 @@ export function resolveSourceRepoPath(explicitPath) {
   return detected || DEFAULT_SOURCE_REPO_PATH;
 }
 
-export function parseBooleanFlag(value) {
+export function parseBooleanFlag(value, { defaultValue = false } = {}) {
   if (typeof value !== "string") {
-    return false;
+    return defaultValue;
   }
 
   return TRUE_BOOLEAN_VALUES.has(value.trim().toLowerCase());
