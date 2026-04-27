@@ -17,6 +17,10 @@ const SOURCE_REPO_ALLOWED_PATH_PREFIXES = ["ideas/", "notes/", "handoff/"];
 const SOURCE_REPO_KNOWN_PLACEHOLDERS = new Set(["-", "—", "–", "未作成", "未設定", "N/A", "n/a"]);
 const SOURCE_REPO_INDEX_RELATIVE_PATH = path.join("status", "project-index.md");
 const ASANA_SECTION_NAME_MAX_LEN = 80;
+const ASANA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const ASANA_RETRYABLE_METHODS = new Set(["GET", "PUT"]);
+const DEFAULT_ASANA_API_MAX_RETRIES = 3;
+const DEFAULT_ASANA_API_RETRY_BASE_MS = 500;
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
@@ -29,7 +33,12 @@ async function main() {
   if (!dryRun && !projectGid) {
     throw new Error("ASANA_PROJECT_URL から project GID を読めませんでした。");
   }
-  const asana = config.asanaToken ? createAsanaClient(config.asanaToken) : null;
+  const asana = config.asanaToken
+    ? createAsanaClient(config.asanaToken, {
+        maxRetries: config.asanaApiMaxRetries,
+        retryBaseMs: config.asanaApiRetryBaseMs,
+      })
+    : null;
 
   const resolveSectionGidByName = asana
     ? createSectionResolver(asana, projectGid)
@@ -171,7 +180,30 @@ function loadConfig({ dryRun }) {
         process.env.BUSSINES_IDEA_REPO_URL ||
         DEFAULT_SOURCE_REPO_URL
       ).replace(/\/$/, ""),
+    asanaApiMaxRetries: parseNonNegativeInteger(
+      process.env.ASANA_API_MAX_RETRIES,
+      DEFAULT_ASANA_API_MAX_RETRIES,
+      { envName: "ASANA_API_MAX_RETRIES" },
+    ),
+    asanaApiRetryBaseMs: parseNonNegativeInteger(
+      process.env.ASANA_API_RETRY_BASE_MS,
+      DEFAULT_ASANA_API_RETRY_BASE_MS,
+      { envName: "ASANA_API_RETRY_BASE_MS" },
+    ),
   };
+}
+
+export function parseNonNegativeInteger(value, fallback, { envName = "value" } = {}) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${envName} は 0 以上の整数で指定してください。`);
+  }
+
+  return parsed;
 }
 
 export function resolveSourceRepoPath(explicitPath) {
@@ -587,8 +619,17 @@ export function formatTaskFieldValue(value, { fallback = "未設定" } = {}) {
   return normalized;
 }
 
-function createAsanaClient(token) {
+export function createAsanaClient(
+  token,
+  {
+    fetchImpl = fetch,
+    maxRetries = DEFAULT_ASANA_API_MAX_RETRIES,
+    retryBaseMs = DEFAULT_ASANA_API_RETRY_BASE_MS,
+    sleepImpl = sleep,
+  } = {},
+) {
   return async function request(method, endpoint, { body, query } = {}) {
+    const retryEligible = isAsanaRetryEligibleRequest(method, endpoint);
     const url = new URL(`${ASANA_BASE_URL}${endpoint}`);
     if (query) {
       for (const [key, value] of Object.entries(query)) {
@@ -598,22 +639,97 @@ function createAsanaClient(token) {
       }
     }
 
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: body ? JSON.stringify({ data: body }) : undefined,
-    });
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      let response;
+      try {
+        response = await fetchImpl(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: body ? JSON.stringify({ data: body }) : undefined,
+        });
+      } catch (error) {
+        if (retryEligible && attempt < maxRetries) {
+          await sleepImpl(computeRetryDelayMs(attempt, retryBaseMs));
+          continue;
+        }
+        throw new Error(`Asana API network error: ${error instanceof Error ? error.message : String(error)}`);
+      }
 
-    const json = await response.json();
-    if (!response.ok) {
-      throw new Error(`Asana API error: ${response.status} ${JSON.stringify(json)}`);
+      const payload = await parseAsanaPayload(response);
+      if (response.ok) {
+        return payload;
+      }
+
+      const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+      const shouldRetry =
+        retryEligible &&
+        ASANA_RETRYABLE_STATUS_CODES.has(response.status) &&
+        attempt < maxRetries;
+      if (shouldRetry) {
+        await sleepImpl(retryAfterMs ?? computeRetryDelayMs(attempt, retryBaseMs));
+        continue;
+      }
+
+      throw new Error(`Asana API error: ${response.status} ${JSON.stringify(payload)}`);
     }
 
-    return json;
+    throw new Error("Asana API error: retry loop reached an unexpected state");
   };
+}
+
+export function isAsanaRetryEligibleRequest(method, endpoint) {
+  const normalizedMethod = String(method || "").toUpperCase();
+
+  // Explicitly block non-idempotent create endpoints even if method policy changes later.
+  if (endpoint === "/tasks" || /^\/projects\/[^/]+\/sections$/.test(endpoint)) {
+    return false;
+  }
+
+  return ASANA_RETRYABLE_METHODS.has(normalizedMethod);
+}
+
+export function computeRetryDelayMs(attempt, retryBaseMs) {
+  return retryBaseMs * Math.pow(2, attempt);
+}
+
+export function parseRetryAfterMs(retryAfterHeader) {
+  if (!retryAfterHeader) {
+    return null;
+  }
+
+  const seconds = Number.parseInt(retryAfterHeader, 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const retryAt = Date.parse(retryAfterHeader);
+  if (Number.isNaN(retryAt)) {
+    return null;
+  }
+
+  return Math.max(0, retryAt - Date.now());
+}
+
+async function parseAsanaPayload(response) {
+  const text = await response.text();
+  if (!text) {
+    return { data: null };
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function listProjectTasks(asana, projectGid) {

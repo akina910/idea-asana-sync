@@ -4,12 +4,17 @@ import {
   areTaskContentsEqual,
   buildSourceRepoFileUrl,
   buildTaskNotes,
+  computeRetryDelayMs,
+  createAsanaClient,
   createSectionResolver,
   extractProjectGidFromUrl,
   formatTaskFieldValue,
+  isAsanaRetryEligibleRequest,
   normalizeSectionName,
   canonicalizeStatusForSection,
+  parseNonNegativeInteger,
   parseBooleanFlag,
+  parseRetryAfterMs,
   getTaskSectionGid,
   hydrateIdea,
   parseIndexTable,
@@ -73,6 +78,51 @@ describe("parseBooleanFlag", () => {
   it("supports overriding the default for missing env values", () => {
     assert.equal(parseBooleanFlag(undefined, { defaultValue: true }), true);
     assert.equal(parseBooleanFlag(null, { defaultValue: true }), true);
+  });
+});
+
+describe("parseNonNegativeInteger", () => {
+  it("returns fallback when value is missing", () => {
+    assert.equal(parseNonNegativeInteger(undefined, 3), 3);
+    assert.equal(parseNonNegativeInteger("", 5), 5);
+  });
+
+  it("parses non-negative integer strings", () => {
+    assert.equal(parseNonNegativeInteger("0", 3), 0);
+    assert.equal(parseNonNegativeInteger("7", 3), 7);
+  });
+
+  it("throws for invalid values", () => {
+    assert.throws(() => parseNonNegativeInteger("-1", 3, { envName: "X" }), /X は 0 以上の整数/);
+    assert.throws(() => parseNonNegativeInteger("abc", 3, { envName: "X" }), /X は 0 以上の整数/);
+  });
+});
+
+describe("Asana retry helpers", () => {
+  it("computes exponential backoff from attempt number", () => {
+    assert.equal(computeRetryDelayMs(0, 500), 500);
+    assert.equal(computeRetryDelayMs(1, 500), 1000);
+    assert.equal(computeRetryDelayMs(2, 500), 2000);
+  });
+
+  it("parses Retry-After seconds", () => {
+    assert.equal(parseRetryAfterMs("2"), 2000);
+  });
+
+  it("returns null for invalid Retry-After values", () => {
+    assert.equal(parseRetryAfterMs("not-a-number"), null);
+    assert.equal(parseRetryAfterMs(null), null);
+  });
+
+  it("limits retries to retry-safe methods", () => {
+    assert.equal(isAsanaRetryEligibleRequest("GET", "/projects/1/tasks"), true);
+    assert.equal(isAsanaRetryEligibleRequest("PUT", "/tasks/1"), true);
+    assert.equal(isAsanaRetryEligibleRequest("POST", "/sections/1/addTask"), false);
+  });
+
+  it("always blocks non-idempotent creation endpoints", () => {
+    assert.equal(isAsanaRetryEligibleRequest("POST", "/tasks"), false);
+    assert.equal(isAsanaRetryEligibleRequest("POST", "/projects/1/sections"), false);
   });
 });
 
@@ -737,6 +787,129 @@ describe("createSectionResolver", () => {
       calls.filter((call) => call.method === "POST" && call.endpoint === "/projects/proj-1/sections").length,
       1,
     );
+  });
+});
+
+describe("createAsanaClient retries", () => {
+  it("retries 429 responses and then succeeds", async () => {
+    const delays = [];
+    const calls = [];
+    const fetchImpl = async () => {
+      calls.push("call");
+      if (calls.length === 1) {
+        return new Response(JSON.stringify({ errors: [{ message: "rate limited" }] }), {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "1" },
+        });
+      }
+      return new Response(JSON.stringify({ data: { gid: "ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const asana = createAsanaClient("token", {
+      fetchImpl,
+      maxRetries: 2,
+      retryBaseMs: 50,
+      sleepImpl: async (ms) => {
+        delays.push(ms);
+      },
+    });
+
+    const result = await asana("GET", "/projects/1/tasks");
+    assert.equal(result.data.gid, "ok");
+    assert.equal(calls.length, 2);
+    assert.deepEqual(delays, [1000]);
+  });
+
+  it("retries network errors and eventually succeeds", async () => {
+    const delays = [];
+    let attempt = 0;
+    const fetchImpl = async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        throw new Error("temporary network error");
+      }
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const asana = createAsanaClient("token", {
+      fetchImpl,
+      maxRetries: 2,
+      retryBaseMs: 25,
+      sleepImpl: async (ms) => {
+        delays.push(ms);
+      },
+    });
+
+    const result = await asana("GET", "/projects/1/tasks");
+    assert.deepEqual(result.data, []);
+    assert.equal(attempt, 2);
+    assert.deepEqual(delays, [25]);
+  });
+
+  it("does not retry non-retryable status codes", async () => {
+    let calls = 0;
+    const asana = createAsanaClient("token", {
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ errors: [{ message: "bad request" }] }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      },
+      maxRetries: 3,
+      sleepImpl: async () => {},
+    });
+
+    await assert.rejects(
+      () => asana("GET", "/projects/1/tasks"),
+      /Asana API error: 400/,
+    );
+    assert.equal(calls, 1);
+  });
+
+  it("does not retry POST /tasks on retryable status", async () => {
+    let calls = 0;
+    const asana = createAsanaClient("token", {
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ errors: [{ message: "rate limited" }] }), {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "1" },
+        });
+      },
+      maxRetries: 3,
+      sleepImpl: async () => {},
+    });
+
+    await assert.rejects(
+      () => asana("POST", "/tasks", { body: { name: "n" } }),
+      /Asana API error: 429/,
+    );
+    assert.equal(calls, 1);
+  });
+
+  it("does not retry POST /projects/{gid}/sections on network errors", async () => {
+    let calls = 0;
+    const asana = createAsanaClient("token", {
+      fetchImpl: async () => {
+        calls += 1;
+        throw new Error("temporary network error");
+      },
+      maxRetries: 3,
+      sleepImpl: async () => {},
+    });
+
+    await assert.rejects(
+      () => asana("POST", "/projects/proj-1/sections", { body: { name: "section" } }),
+      /Asana API network error: temporary network error/,
+    );
+    assert.equal(calls, 1);
   });
 });
 
