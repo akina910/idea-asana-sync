@@ -25,13 +25,19 @@ const DEFAULT_ASANA_API_MAX_RETRIES = 3;
 const DEFAULT_ASANA_API_RETRY_BASE_MS = 500;
 
 async function main() {
-  const dryRun = process.argv.includes("--dry-run");
+  const doctorMode = process.argv.includes("--doctor");
+  const dryRun = process.argv.includes("--dry-run") || doctorMode;
   const config = loadConfig({ dryRun });
   const indexPath = path.join(config.sourceRepoPath, "status", "project-index.md");
   const indexMarkdown = await fs.readFile(indexPath, "utf8");
   const rows = parseIndexTable(indexMarkdown);
   const ideas = await Promise.all(rows.map((row) => hydrateIdea(row, config)));
   const projectGid = extractProjectGidFromUrl(config.projectUrl);
+  if (doctorMode) {
+    process.stdout.write(`${JSON.stringify(buildDoctorReport(config, ideas, projectGid), null, 2)}\n`);
+    return;
+  }
+
   if (!dryRun && !projectGid) {
     throw new Error("ASANA_PROJECT_URL から project GID を読めませんでした。");
   }
@@ -303,6 +309,33 @@ export function resolveTargetSectionName(idea, config) {
   }
 
   return normalizeSectionName(config.sectionName, { fallback: null });
+}
+
+export function buildDoctorReport(config, ideas, projectGid) {
+  const targetSections = [...new Set(ideas.map((idea) => resolveTargetSectionName(idea, config)).filter(Boolean))];
+
+  return {
+    ok: Boolean(config.sourceRepoPath && ideas.length > 0),
+    sourceRepoPath: config.sourceRepoPath,
+    sourceRepoUrl: config.sourceRepoUrl,
+    asana: {
+      hasAccessToken: Boolean(config.asanaToken),
+      projectGid,
+      projectUrlValid: !config.projectUrl || Boolean(projectGid),
+    },
+    sections: {
+      useStatusSections: config.useStatusSections,
+      fixedSectionName: config.useStatusSections ? null : config.sectionName,
+      statusSectionMapSize: config.statusSectionMap?.size || 0,
+      targetSections,
+    },
+    source: {
+      ideaCount: ideas.length,
+      missingIdeaFiles: ideas
+        .filter((idea) => idea.sourceFileMissing)
+        .map((idea) => ({ id: idea.id, path: idea.ideaPath })),
+    },
+  };
 }
 
 export function canonicalizeStatusForSection(status) {

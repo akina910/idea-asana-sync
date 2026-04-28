@@ -1,6 +1,8 @@
 {
   "type": "module",
   "scripts": {
+    "doctor": "node sync-ideas-to-asana.mjs --doctor",
+    "dry-run": "node sync-ideas-to-asana.mjs --dry-run",
     "test": "node --test"
   }
 }

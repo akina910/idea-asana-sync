@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   areTaskContentsEqual,
   buildSourceRepoFileUrl,
+  buildDoctorReport,
   buildTaskNotes,
   computeRetryDelayMs,
   createAsanaClient,
@@ -248,6 +249,67 @@ describe("resolveTargetSectionName", () => {
     );
     assert.equal(section.length, 80);
     assert.ok(section.endsWith("…"));
+  });
+});
+
+describe("buildDoctorReport", () => {
+  it("summarizes source, Asana, and target sections without mutating Asana", () => {
+    const report = buildDoctorReport(
+      {
+        sourceRepoPath: "/repo/source",
+        sourceRepoUrl: "https://github.com/example/source",
+        asanaToken: "token",
+        projectUrl: "https://app.asana.com/0/123/list",
+        useStatusSections: true,
+        sectionName: "Legacy",
+        statusSectionMap: new Map([["手動ローンチ実行待ち", "要対応"]]),
+      },
+      [
+        {
+          id: "BI-001",
+          status: "分離済み",
+          ideaPath: "ideas/BI-001.md",
+          sourceFileMissing: false,
+        },
+        {
+          id: "BI-002",
+          status: "手動ローンチ実行待ち",
+          ideaPath: "ideas/BI-002.md",
+          sourceFileMissing: true,
+        },
+      ],
+      "123",
+    );
+
+    assert.equal(report.ok, true);
+    assert.equal(report.asana.hasAccessToken, true);
+    assert.equal(report.asana.projectGid, "123");
+    assert.equal(report.asana.projectUrlValid, true);
+    assert.deepEqual(report.sections.targetSections, ["分離済み", "要対応"]);
+    assert.deepEqual(report.source.missingIdeaFiles, [
+      { id: "BI-002", path: "ideas/BI-002.md" },
+    ]);
+  });
+
+  it("flags invalid optional Asana project URLs", () => {
+    const report = buildDoctorReport(
+      {
+        sourceRepoPath: "/repo/source",
+        sourceRepoUrl: "https://github.com/example/source",
+        asanaToken: null,
+        projectUrl: "https://app.asana.com/home",
+        useStatusSections: false,
+        sectionName: "Inbox",
+        statusSectionMap: new Map(),
+      },
+      [{ id: "BI-001", status: "分離済み", ideaPath: "ideas/BI-001.md" }],
+      null,
+    );
+
+    assert.equal(report.asana.hasAccessToken, false);
+    assert.equal(report.asana.projectGid, null);
+    assert.equal(report.asana.projectUrlValid, false);
+    assert.deepEqual(report.sections.targetSections, ["Inbox"]);
   });
 });
 

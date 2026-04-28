@@ -40,6 +40,16 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      - name: Inspect sync inputs
+        env:
+          ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
+          ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
+          ASANA_USE_STATUS_SECTIONS: ${{ vars.ASANA_USE_STATUS_SECTIONS || secrets.ASANA_USE_STATUS_SECTIONS || 'true' }}
+          ASANA_STATUS_SECTION_MAP_JSON: ${{ vars.ASANA_STATUS_SECTION_MAP_JSON || secrets.ASANA_STATUS_SECTION_MAP_JSON }}
+          SOURCE_REPO_PATH: ./source-bussines-idea
+          SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
+        run: npm run doctor
+
       - name: Sync ideas to Asana
         env:
           ASANA_ACCESS_TOKEN: ${{ secrets.ASANA_ACCESS_TOKEN }}
