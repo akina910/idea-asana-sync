@@ -70,6 +70,8 @@ describe("parseBooleanFlag", () => {
   it("returns false for non-truthy values", () => {
     assert.equal(parseBooleanFlag("false"), false);
     assert.equal(parseBooleanFlag("0"), false);
+    assert.equal(parseBooleanFlag("no"), false);
+    assert.equal(parseBooleanFlag("off"), false);
     assert.equal(parseBooleanFlag(""), false);
     assert.equal(parseBooleanFlag(undefined), false);
     assert.equal(parseBooleanFlag(null), false);
@@ -78,6 +80,12 @@ describe("parseBooleanFlag", () => {
   it("supports overriding the default for missing env values", () => {
     assert.equal(parseBooleanFlag(undefined, { defaultValue: true }), true);
     assert.equal(parseBooleanFlag(null, { defaultValue: true }), true);
+    assert.equal(parseBooleanFlag("", { defaultValue: true }), true);
+  });
+
+  it("falls back to default when value is unknown", () => {
+    assert.equal(parseBooleanFlag("treu", { defaultValue: true }), true);
+    assert.equal(parseBooleanFlag("treu", { defaultValue: false }), false);
   });
 });
 
@@ -95,6 +103,7 @@ describe("parseNonNegativeInteger", () => {
   it("throws for invalid values", () => {
     assert.throws(() => parseNonNegativeInteger("-1", 3, { envName: "X" }), /X は 0 以上の整数/);
     assert.throws(() => parseNonNegativeInteger("abc", 3, { envName: "X" }), /X は 0 以上の整数/);
+    assert.throws(() => parseNonNegativeInteger("7ms", 3, { envName: "X" }), /X は 0 以上の整数/);
   });
 });
 

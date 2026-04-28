@@ -13,6 +13,7 @@ const SYNCED_TASK_NAME_PATTERN = /^\[(BI-\d+)\]\s+/;
 const TASK_MANAGED_MARKER = "Managed-By: idea-asana-sync";
 const STATUS_SECTION_FALLBACK_NAME = "未分類";
 const TRUE_BOOLEAN_VALUES = new Set(["1", "true", "yes", "on"]);
+const FALSE_BOOLEAN_VALUES = new Set(["0", "false", "no", "off"]);
 const SOURCE_REPO_ALLOWED_PATH_PREFIXES = ["ideas/", "notes/", "handoff/"];
 const SOURCE_REPO_KNOWN_PLACEHOLDERS = new Set(["-", "—", "–", "未作成", "未設定", "N/A", "n/a"]);
 const SOURCE_REPO_INDEX_RELATIVE_PATH = path.join("status", "project-index.md");
@@ -198,8 +199,13 @@ export function parseNonNegativeInteger(value, fallback, { envName = "value" } =
     return fallback;
   }
 
-  const parsed = Number.parseInt(String(value), 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  const normalized = String(value).trim();
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error(`${envName} は 0 以上の整数で指定してください。`);
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed)) {
     throw new Error(`${envName} は 0 以上の整数で指定してください。`);
   }
 
@@ -223,7 +229,20 @@ export function parseBooleanFlag(value, { defaultValue = false } = {}) {
     return defaultValue;
   }
 
-  return TRUE_BOOLEAN_VALUES.has(value.trim().toLowerCase());
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return defaultValue;
+  }
+
+  if (TRUE_BOOLEAN_VALUES.has(normalized)) {
+    return true;
+  }
+
+  if (FALSE_BOOLEAN_VALUES.has(normalized)) {
+    return false;
+  }
+
+  return defaultValue;
 }
 
 export function normalizeSectionName(sectionName, { fallback = STATUS_SECTION_FALLBACK_NAME } = {}) {
