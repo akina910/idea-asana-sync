@@ -15,6 +15,7 @@ const STATUS_SECTION_FALLBACK_NAME = "未分類";
 const TRUE_BOOLEAN_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_BOOLEAN_VALUES = new Set(["0", "false", "no", "off"]);
 const SOURCE_REPO_ALLOWED_PATH_PREFIXES = ["ideas/", "notes/", "handoff/"];
+const SOURCE_REPO_IDEA_PATH_PREFIX = "ideas/";
 const SOURCE_REPO_KNOWN_PLACEHOLDERS = new Set(["-", "—", "–", "未作成", "未設定", "N/A", "n/a"]);
 const SOURCE_REPO_INDEX_RELATIVE_PATH = path.join("status", "project-index.md");
 const ASANA_SECTION_NAME_MAX_LEN = 80;
@@ -368,6 +369,42 @@ function stripCode(value) {
   return value.replace(/^`|`$/g, "");
 }
 
+export function normalizeSourceRepoRelativePath(
+  repoPath,
+  { allowedPrefixes = SOURCE_REPO_ALLOWED_PATH_PREFIXES } = {},
+) {
+  if (typeof repoPath !== "string") {
+    return null;
+  }
+
+  const normalizedRepoPath = repoPath
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "");
+  if (!normalizedRepoPath) {
+    return null;
+  }
+
+  if (
+    SOURCE_REPO_KNOWN_PLACEHOLDERS.has(normalizedRepoPath) ||
+    /^[-—–]+$/.test(normalizedRepoPath)
+  ) {
+    return null;
+  }
+
+  const isAllowedRepoPath = allowedPrefixes.some((prefix) => normalizedRepoPath.startsWith(prefix));
+  if (!isAllowedRepoPath) {
+    return null;
+  }
+
+  const segments = normalizedRepoPath.split("/");
+  if (segments.some((segment) => segment === ".." || segment === "." || !segment)) {
+    return null;
+  }
+
+  return normalizedRepoPath;
+}
+
 export async function hydrateIdea(row, config) {
   const ideaMarkdown = await readOptionalSourceFile(config.sourceRepoPath, row.ideaPath);
   const summary = ideaMarkdown ? (extractSection(ideaMarkdown, "一言") || row.oneLine) : row.oneLine;
@@ -382,11 +419,31 @@ export async function hydrateIdea(row, config) {
 }
 
 async function readOptionalSourceFile(sourceRepoPath, repoPath) {
+  const normalizedRepoPath = normalizeSourceRepoRelativePath(repoPath, {
+    allowedPrefixes: [SOURCE_REPO_IDEA_PATH_PREFIX],
+  });
+  if (!normalizedRepoPath) {
+    console.warn(`[warn] source idea path is invalid; using project-index row fallback: ${repoPath}`);
+    return null;
+  }
+
+  const resolvedRepoRoot = path.resolve(sourceRepoPath);
+  const resolvedFilePath = path.resolve(resolvedRepoRoot, normalizedRepoPath);
+  const relativePath = path.relative(resolvedRepoRoot, resolvedFilePath);
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    console.warn(
+      `[warn] source idea path escapes source repo; using project-index row fallback: ${normalizedRepoPath}`,
+    );
+    return null;
+  }
+
   try {
-    return await fs.readFile(path.join(sourceRepoPath, repoPath), "utf8");
+    return await fs.readFile(resolvedFilePath, "utf8");
   } catch (error) {
     if (error?.code === "ENOENT") {
-      console.warn(`[warn] source idea file is missing; using project-index row fallback: ${repoPath}`);
+      console.warn(
+        `[warn] source idea file is missing; using project-index row fallback: ${normalizedRepoPath}`,
+      );
       return null;
     }
     throw error;
@@ -560,29 +617,18 @@ function serializeTaskPreview(task) {
 }
 
 export function buildSourceRepoFileUrl(sourceRepoUrl, repoPath) {
-  if (typeof repoPath !== "string") {
-    return null;
-  }
-
-  const normalizedRepoPath = repoPath.trim().replace(/^\.\/+/, "");
-  if (!normalizedRepoPath) {
-    return null;
-  }
-
-  if (
-    SOURCE_REPO_KNOWN_PLACEHOLDERS.has(normalizedRepoPath) ||
-    /^[-—–]+$/.test(normalizedRepoPath)
-  ) {
-    return null;
-  }
-
-  const isAllowedRepoPath = SOURCE_REPO_ALLOWED_PATH_PREFIXES.some((prefix) =>
-    normalizedRepoPath.startsWith(prefix),
-  );
-  if (!isAllowedRepoPath) {
+  const rawRepoPath = typeof repoPath === "string" ? repoPath.trim().replace(/\\/g, "/") : null;
+  const normalizedRepoPath = normalizeSourceRepoRelativePath(repoPath);
+  const isKnownPlaceholder =
+    rawRepoPath &&
+    (SOURCE_REPO_KNOWN_PLACEHOLDERS.has(rawRepoPath) || /^[-—–]+$/.test(rawRepoPath));
+  if (rawRepoPath && !normalizedRepoPath && !isKnownPlaceholder) {
     console.warn(
-      `[warn] source repo path is not linkable; ignoring value: ${normalizedRepoPath}`,
+      `[warn] source repo path is not linkable; ignoring value: ${rawRepoPath}`,
     );
+  }
+
+  if (!normalizedRepoPath) {
     return null;
   }
 

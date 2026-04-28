@@ -11,6 +11,7 @@ import {
   formatTaskFieldValue,
   isAsanaRetryEligibleRequest,
   normalizeSectionName,
+  normalizeSourceRepoRelativePath,
   canonicalizeStatusForSection,
   parseNonNegativeInteger,
   parseBooleanFlag,
@@ -306,11 +307,72 @@ describe("hydrateIdea", () => {
       console.warn = originalWarn;
     }
   });
+
+  it("falls back when ideaPath is outside allowed prefixes", async () => {
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (message) => {
+      warnings.push(message);
+    };
+
+    try {
+      const idea = await hydrateIdea(
+        {
+          id: "BI-099",
+          title: "Invalid Path Project",
+          type: "Internal",
+          status: "分離済み",
+          implementation: "公開中",
+          splitRepo: "invalid-path-project",
+          oneLine: "project-index 側の一言を使う。",
+          nextAction: "確認する",
+          ideaPath: "../outside.md",
+          notesPath: "notes/BI-099.md",
+          handoffPath: "handoff/BI-099.md",
+        },
+        {
+          sourceRepoPath: "/tmp/idea-asana-sync",
+          sourceRepoUrl: "https://github.com/example/repo",
+        },
+      );
+
+      assert.equal(idea.summary, "project-index 側の一言を使う。");
+      assert.equal(idea.sourceFileMissing, true);
+      assert.deepEqual(warnings, [
+        "[warn] source idea path is invalid; using project-index row fallback: ../outside.md",
+        "[warn] source repo path is not linkable; ignoring value: ../outside.md",
+      ]);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
 // buildSourceRepoFileUrl / buildTaskNotes
 // ---------------------------------------------------------------------------
+describe("normalizeSourceRepoRelativePath", () => {
+  it("normalizes allowed paths and strips leading ./", () => {
+    assert.equal(
+      normalizeSourceRepoRelativePath(" ./notes/BI-001.md "),
+      "notes/BI-001.md",
+    );
+  });
+
+  it("accepts backslash paths by normalizing to slash", () => {
+    assert.equal(
+      normalizeSourceRepoRelativePath("handoff\\BI-001.md"),
+      "handoff/BI-001.md",
+    );
+  });
+
+  it("returns null for traversal or disallowed prefixes", () => {
+    assert.equal(normalizeSourceRepoRelativePath("../notes/BI-001.md"), null);
+    assert.equal(normalizeSourceRepoRelativePath("ideas/../BI-001.md"), null);
+    assert.equal(normalizeSourceRepoRelativePath("misc/BI-001.md"), null);
+  });
+});
+
 describe("buildSourceRepoFileUrl", () => {
   it("builds a blob URL for a normal repo path", () => {
     assert.equal(
@@ -349,6 +411,24 @@ describe("buildSourceRepoFileUrl", () => {
 
     assert.deepEqual(warnings, [
       "[warn] source repo path is not linkable; ignoring value: misc/BI-001.md",
+    ]);
+  });
+
+  it("returns null and warns for traversal-like paths", () => {
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (message) => {
+      warnings.push(message);
+    };
+
+    try {
+      assert.equal(buildSourceRepoFileUrl("https://github.com/example/repo", "notes/../BI-001.md"), null);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    assert.deepEqual(warnings, [
+      "[warn] source repo path is not linkable; ignoring value: notes/../BI-001.md",
     ]);
   });
 });
