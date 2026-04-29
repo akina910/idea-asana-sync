@@ -88,3 +88,51 @@
 ```md
 【手動・残り2ステップ】①GitHub/Copilot 認証を復旧して Copilot レビューを実行（SecItemCopyMatching failed -50 / gh token invalid を解消）②Actions `Sync Asana` を workflow_dispatch (`dry_run=false`) で1回実行して Asana 側の section 反映を確認。status-section はデフォルト有効化済み、`npm run doctor` で source 68件・missing 0件・section予定13件を確認済み。token rotate は2027-03頃
 ```
+
+## 4) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 21. 2026-04-29 実装 — Markdown table の escaped pipe 対応
+
+### 実施内容
+- `sync-ideas-to-asana.mjs` の `parseIndexTable()` を単純な `split("|")` から `splitMarkdownTableRow()` ベースへ変更
+- `project-index.md` の table cell 内で `\|` と書かれた pipe を列区切りではなく通常文字として扱うようにした
+- `sync-ideas-to-asana.test.mjs` に escaped pipe を含む status / nextAction の回帰テストと helper 単体テストを追加
+- `README.md` に table cell 内の `|` は `\|` と書けることを追記
+
+### 判断理由
+- BI-005 は既に Section 分けがデフォルト有効化済みで、価値の高い残作業は同期入力の壊れにくさを上げること
+- 今後 `Codex \| Copilot \| Claude` のような記述が `project-index.md` に入った場合、旧実装だと列ズレで Asana の状態・次アクション・リンクが壊れる可能性があった
+
+### 実行結果
+- `npm test`: 87/87 pass
+- `npm run doctor`: success。source 68件、missingIdeaFiles 0件、targetSections 13件
+- `npm run dry-run`: success。Asana token/project 未設定のため reconciliation は unavailable
+- `git diff --check`: pass
+
+### Cloudflare MCP 確認結果
+- Cloudflare API MCP で Workers / D1 / KV / R2 の照会を試行
+- `user cancelled MCP tool call` で取得不可
+- BI-005 の現行主経路は GitHub Actions + Asana API のため、Cloudflare リソース作成は不要と判断
+
+### レビューゲート状況
+- Codex: 差分セルフレビュー実施。parser 変更は table row 分割だけに限定され、既存の path 検証・Asana mutation 経路には影響しないことを確認
+- Copilot: `copilot -p ...` / `gh copilot -p ...` とも `SecItemCopyMatching failed -50`。`gh auth status` も token invalid のため未通過
+- Claude: CLI 未導入（`claude: command not found`）
+
+### 次の一手（人間）
+1. 【手動・最優先】GitHub/Copilot 認証復旧（`gh auth login -h github.com` 等）後、Copilot レビューを再実行
+2. 【手動】Actions の `Sync Asana` を `workflow_dispatch` (`dry_run=false`) で1回実行し、Asana 側の section 反映を確認
+```
+
+## 5) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【手動・残り2ステップ】①GitHub/Copilot 認証を復旧して Copilot レビューを実行（SecItemCopyMatching failed -50 / gh token invalid を解消）②Actions `Sync Asana` を workflow_dispatch (`dry_run=false`) で1回実行して Asana 側の section 反映を確認。status-section はデフォルト有効化済み、Markdown table の `\|` 対応・`npm run doctor` source 68件/missing 0件/section予定13件・`npm test` 87件 pass 確認済み。token rotate は2027-03頃
+```

@@ -371,10 +371,7 @@ export function parseIndexTable(markdown) {
       break;
     }
 
-    const cells = line
-      .split("|")
-      .slice(1, -1)
-      .map((cell) => cell.trim());
+    const cells = splitMarkdownTableRow(line);
 
     if (cells.length < 11) {
       continue;
@@ -396,6 +393,47 @@ export function parseIndexTable(markdown) {
   }
 
   return rows;
+}
+
+export function splitMarkdownTableRow(line) {
+  const cells = [];
+  let cell = "";
+  let escaped = false;
+
+  for (const char of line) {
+    if (escaped) {
+      cell += char === "|" ? "|" : `\\${char}`;
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (char === "|") {
+      cells.push(cell.trim());
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  if (escaped) {
+    cell += "\\";
+  }
+  cells.push(cell.trim());
+
+  if (line.trimStart().startsWith("|")) {
+    cells.shift();
+  }
+  if (line.trimEnd().endsWith("|")) {
+    cells.pop();
+  }
+
+  return cells;
 }
 
 function stripCode(value) {

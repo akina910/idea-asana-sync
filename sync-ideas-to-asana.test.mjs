@@ -21,6 +21,7 @@ import {
   hydrateIdea,
   parseIndexTable,
   parseStatusSectionMap,
+  splitMarkdownTableRow,
   extractSection,
   extractIdeaIdFromTaskName,
   isManagedSyncTask,
@@ -839,6 +840,17 @@ describe("parseIndexTable", () => {
     assert.equal(rows[1].status, "分離済み");
   });
 
+  it("keeps escaped pipe characters inside cells", () => {
+    const md = `| ID | タイトル | タイプ | 一言 | 状態 | 実装 | 分離repo | 次アクション | idea | notes | handoff |
+|----|----------|--------|------|------|------|----------|-------------|------|-------|---------|
+| BI-077 | Pipe Project | Internal | 説明 | 着手中 \\| 要確認 | - | - | Codex \\| Copilot \\| Claude review | \`ideas/BI-077.md\` | \`notes/BI-077.md\` | \`handoff/BI-077.md\` |
+`;
+    const rows = parseIndexTable(md);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, "着手中 | 要確認");
+    assert.equal(rows[0].nextAction, "Codex | Copilot | Claude review");
+  });
+
   it("throws when table header is not found", () => {
     assert.throws(
       () => parseIndexTable("# No table here\n\nJust text."),
@@ -855,6 +867,20 @@ describe("parseIndexTable", () => {
     const rows = parseIndexTable(md);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].id, "BI-002");
+  });
+});
+
+describe("splitMarkdownTableRow", () => {
+  it("splits a pipe-delimited row and removes outer empty cells", () => {
+    assert.deepEqual(splitMarkdownTableRow("| A | B | C |"), ["A", "B", "C"]);
+  });
+
+  it("treats escaped pipes as cell content", () => {
+    assert.deepEqual(splitMarkdownTableRow("| A \\| B | C |"), ["A | B", "C"]);
+  });
+
+  it("preserves non-pipe escape sequences", () => {
+    assert.deepEqual(splitMarkdownTableRow("| A \\\\ B |"), ["A \\\\ B"]);
   });
 });
 
