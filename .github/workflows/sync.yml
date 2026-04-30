@@ -66,7 +66,13 @@ jobs:
           SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run || 'false' }}" == "true" ]]; then
-            node sync-ideas-to-asana.mjs --dry-run
+            node sync-ideas-to-asana.mjs --dry-run > "$RUNNER_TEMP/asana-dry-run.json"
+            node summarize-dry-run.mjs "$RUNNER_TEMP/asana-dry-run.json" > "$RUNNER_TEMP/asana-dry-run-summary.md"
+            cat "$RUNNER_TEMP/asana-dry-run-summary.md"
+            if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+              cat "$RUNNER_TEMP/asana-dry-run-summary.md" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            rm -f "$RUNNER_TEMP/asana-dry-run.json" "$RUNNER_TEMP/asana-dry-run-summary.md"
           else
             node sync-ideas-to-asana.mjs
           fi

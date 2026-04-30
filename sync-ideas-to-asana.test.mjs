@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   areTaskContentsEqual,
+  buildDryRunMarkdownSummary,
   buildSourceRepoFileUrl,
   buildDoctorReport,
   buildTaskNotes,
@@ -22,6 +23,7 @@ import {
   parseIndexTable,
   parseStatusSectionMap,
   splitMarkdownTableRow,
+  summarizeDryRunOutput,
   extractSection,
   extractIdeaIdFromTaskName,
   isManagedSyncTask,
@@ -369,6 +371,65 @@ describe("buildDoctorReport", () => {
     assert.deepEqual(report.issues, [
       "strict doctor では missing idea file が 0 件である必要があります。現在 1 件です。",
     ]);
+  });
+});
+
+describe("dry-run summary helpers", () => {
+  const dryRunOutput = {
+    projectGid: "123",
+    ideas: [
+      { id: "BI-001", _section: "着手中", _taskAction: "created", _sectionAction: "assigned" },
+      { id: "BI-002", _section: "分離済み", _taskAction: "updated", _sectionAction: "moved" },
+      { id: "BI-003", _section: "着手中", _taskAction: "unchanged", _sectionAction: "unchanged" },
+      { id: "BI-004", _section: "発想", _taskAction: "created", _sectionAction: "assigned" },
+    ],
+    reconciliation: {
+      available: true,
+      orphanedTasksToRemove: [{ gid: "orphan-1", name: "[BI-999] Old" }],
+      duplicateTasksToRemove: [{ gid: "duplicate-1", name: "[BI-001] Duplicate" }],
+    },
+  };
+
+  it("counts dry-run task and section actions without including task notes", () => {
+    const summary = summarizeDryRunOutput(dryRunOutput);
+
+    assert.deepEqual(summary.taskActions, {
+      created: 2,
+      updated: 1,
+      unchanged: 1,
+    });
+    assert.deepEqual(summary.sectionActions, {
+      assigned: 2,
+      moved: 1,
+      unchanged: 1,
+    });
+    assert.deepEqual(summary.targetSections, ["分離済み", "発想", "着手中"]);
+    assert.equal(summary.reconciliation.orphanedTasksToRemove.length, 1);
+    assert.equal(summary.reconciliation.duplicateTasksToRemove.length, 1);
+  });
+
+  it("builds a concise Markdown summary for GitHub Actions", () => {
+    const markdown = buildDryRunMarkdownSummary(dryRunOutput);
+
+    assert.match(markdown, /## Asana dry-run summary/);
+    assert.match(markdown, /\| created \| 2 \|/);
+    assert.match(markdown, /\| moved \| 1 \|/);
+    assert.match(markdown, /orphanedTasksToRemove: 1/);
+    assert.match(markdown, /\[BI-999\] Old \(orphan-1\)/);
+  });
+
+  it("explains why reconciliation is unavailable when Asana credentials are absent", () => {
+    const markdown = buildDryRunMarkdownSummary({
+      projectGid: null,
+      ideas: [],
+      reconciliation: {
+        available: false,
+        reason: "ASANA_ACCESS_TOKEN が未設定のため、既存 task の削除候補は計算できません。",
+      },
+    });
+
+    assert.match(markdown, /status: unavailable/);
+    assert.match(markdown, /ASANA_ACCESS_TOKEN が未設定/);
   });
 });
 

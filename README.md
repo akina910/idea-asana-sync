@@ -93,6 +93,7 @@ table cell 内で `|` を使う場合は Markdown として `\|` と書くと、
 npm run doctor
 npm run doctor:strict
 npm run dry-run
+npm run dry-run:summary
 node sync-ideas-to-asana.mjs --dry-run
 ```
 
@@ -104,6 +105,7 @@ node sync-ideas-to-asana.mjs --dry-run
 
 `ASANA_ACCESS_TOKEN` と `ASANA_PROJECT_URL` も渡すと、dry-run JSON に `reconciliation` が追加され、source 側に存在しない managed task や重複 managed task の削除候補も確認できます。
 既存 task を取得できる環境では、各 idea に `_taskAction` (`created / updated / unchanged`) と `_sectionAction` (`assigned / moved / unchanged`) も出るため、本番実行前に差分の有無を確認できます。
+`npm run dry-run:summary` は詳細 JSON を Markdown の要約に変換し、作成/更新/移動/削除候補の件数だけを確認できます。GitHub Actions の `workflow_dispatch` で `dry_run=true` を選んだ場合も、この summary を Step Summary に出します。
 
 Asana API の一覧取得はページネーション対応済みです。task や section が 100 件を超えても既存 task の重複作成を避けます。
 また、source 側に存在しない task や重複 task を project から取り除くのは、このツールが管理していると判定できる task だけです。

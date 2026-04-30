@@ -4,6 +4,7 @@
     "doctor": "node sync-ideas-to-asana.mjs --doctor",
     "doctor:strict": "node sync-ideas-to-asana.mjs --doctor --strict",
     "dry-run": "node sync-ideas-to-asana.mjs --dry-run",
+    "dry-run:summary": "node sync-ideas-to-asana.mjs --dry-run | node summarize-dry-run.mjs",
     "test": "node --test"
   }
 }

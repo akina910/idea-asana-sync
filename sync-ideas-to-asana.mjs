@@ -658,6 +658,111 @@ export function planTaskReconciliation(tasks, ideas) {
   };
 }
 
+export function summarizeDryRunOutput(dryRunOutput) {
+  const ideas = Array.isArray(dryRunOutput?.ideas) ? dryRunOutput.ideas : [];
+  const reconciliation = dryRunOutput?.reconciliation || {};
+
+  return {
+    projectGid: dryRunOutput?.projectGid || null,
+    ideaCount: ideas.length,
+    taskActions: countBy(ideas, "_taskAction"),
+    sectionActions: countBy(
+      ideas.filter((idea) => idea._sectionAction),
+      "_sectionAction",
+    ),
+    targetSections: [...new Set(ideas.map((idea) => idea._section).filter(Boolean))].sort(),
+    reconciliation: {
+      available: Boolean(reconciliation.available),
+      reason: reconciliation.reason || null,
+      orphanedTasksToRemove: Array.isArray(reconciliation.orphanedTasksToRemove)
+        ? reconciliation.orphanedTasksToRemove
+        : [],
+      duplicateTasksToRemove: Array.isArray(reconciliation.duplicateTasksToRemove)
+        ? reconciliation.duplicateTasksToRemove
+        : [],
+    },
+  };
+}
+
+function countBy(items, key) {
+  const counts = {};
+  for (const item of items) {
+    const value = item?.[key];
+    if (!value) {
+      continue;
+    }
+    counts[value] = (counts[value] || 0) + 1;
+  }
+  return counts;
+}
+
+export function buildDryRunMarkdownSummary(dryRunOutput) {
+  const summary = summarizeDryRunOutput(dryRunOutput);
+  const lines = [
+    "## Asana dry-run summary",
+    "",
+    `- projectGid: ${summary.projectGid || "未設定"}`,
+    `- ideaCount: ${summary.ideaCount}`,
+    `- targetSections: ${summary.targetSections.length ? summary.targetSections.join(", ") : "なし"}`,
+    "",
+    "### Task actions",
+    "",
+    buildCountTable(summary.taskActions, ["created", "updated", "unchanged"]),
+    "",
+    "### Section actions",
+    "",
+    buildCountTable(summary.sectionActions, ["assigned", "moved", "unchanged"]),
+    "",
+    "### Reconciliation",
+    "",
+  ];
+
+  if (!summary.reconciliation.available) {
+    lines.push(
+      `- status: unavailable`,
+      `- reason: ${summary.reconciliation.reason || "不明"}`,
+    );
+  } else {
+    lines.push(
+      `- status: available`,
+      `- orphanedTasksToRemove: ${summary.reconciliation.orphanedTasksToRemove.length}`,
+      `- duplicateTasksToRemove: ${summary.reconciliation.duplicateTasksToRemove.length}`,
+    );
+    lines.push(...formatTaskPreviewList("Orphaned tasks", summary.reconciliation.orphanedTasksToRemove));
+    lines.push(...formatTaskPreviewList("Duplicate tasks", summary.reconciliation.duplicateTasksToRemove));
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function buildCountTable(counts, orderedKeys) {
+  const keys = [
+    ...orderedKeys,
+    ...Object.keys(counts || {}).filter((key) => !orderedKeys.includes(key)).sort(),
+  ];
+  const lines = ["| action | count |", "|---|---:|"];
+  for (const key of keys) {
+    lines.push(`| ${key} | ${counts?.[key] || 0} |`);
+  }
+  return lines.join("\n");
+}
+
+function formatTaskPreviewList(title, tasks) {
+  if (!tasks.length) {
+    return [];
+  }
+
+  const previewLimit = 20;
+  const lines = ["", `#### ${title}`, ""];
+  for (const task of tasks.slice(0, previewLimit)) {
+    lines.push(`- ${task.name || "(no name)"} (${task.gid || "no gid"})`);
+  }
+  if (tasks.length > previewLimit) {
+    lines.push(`- ...and ${tasks.length - previewLimit} more`);
+  }
+  return lines;
+}
+
 export function areTaskContentsEqual(task, idea) {
   return task?.name === idea.taskName && task?.notes === idea.notes;
 }
