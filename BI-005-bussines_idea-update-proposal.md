@@ -240,3 +240,59 @@
 ```md
 【手動・残り2ステップ】①GitHub/Copilot 認証を復旧して Copilot レビューを実行（SecItemCopyMatching failed -50 / gh token invalid を解消。今回の Copilot gate は未通過）②Actions `Sync Asana` を workflow_dispatch (`dry_run=true`) で Step Summary を確認後、`dry_run=false` で1回実行して Asana 側の section 反映を確認。status-section はデフォルト有効化済み、dry-run summary/strict preflight 追加済み、source 68件/missing 0件/section予定13件、`npm test` 92件 pass。token rotate は2027-03頃
 ```
+
+## 10) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 24. 2026-05-01 実装 — strict doctor の token gate 強化
+
+### 現状判断
+- BI-005 は分離済み・運用中で、Asana section 分けもコード上は既に有効化済み
+- `ASANA_USE_STATUS_SECTIONS` は未設定でも default `true` のため、project-index の「Variables に true を追加するだけ」は実態より古い
+- 今いちばん価値があるのは新機能追加ではなく、本番同期前に secrets 不備を早く検知すること
+
+### 実施内容
+- `idea-asana-sync/sync-ideas-to-asana.mjs` の `doctor:strict` で `ASANA_ACCESS_TOKEN` 欠落を non-zero 条件に追加
+- `.github/workflows/sync.yml` の `Inspect sync inputs` に `ASANA_ACCESS_TOKEN` を渡し、本番 `Sync ideas to Asana` 前に secret 欠落で止まるようにした
+- README の `doctor:strict` 説明を更新
+- strict doctor の token 必須テストを追加し、既存 strict テストを新仕様に合わせて更新
+
+### 検証
+```sh
+npm test
+# tests 93 / pass 93
+
+SOURCE_REPO_PATH=/Users/kiyo/Documents/GitHub/bussines_idea npm run doctor
+# ok: true / ideaCount: 68 / missingIdeaFiles: 0 / useStatusSections: true
+
+SOURCE_REPO_PATH=/Users/kiyo/Documents/GitHub/bussines_idea npm run dry-run:summary
+# ideaCount: 68 / targetSections: 13 / credentials 未設定のため reconciliation は unavailable
+```
+
+### Cloudflare MCP 確認結果
+- Cloudflare MCP はこのセッションで `tool_search` したが callable tool が見つからず、Workers/D1/KV の実リソース確認は不可
+- BI-005 の現行構成は GitHub Actions + Asana API で、Cloudflare リソースを前提にしていない
+
+### レビューゲート状況
+- Codex: 実装とテストを自己レビュー済み
+- Copilot: `copilot --help` と `gh copilot -p ...` がどちらも `SecItemCopyMatching failed -50` で失敗。`gh auth status` も token invalid のため今回の gate は未通過
+- Claude: CLI/tool が見つからないため、この環境では実行不可
+
+### 次の一手（人間）
+1. 【手動・最優先】GitHub/Copilot 認証を復旧（例: `gh auth login -h github.com`）して Copilot レビューを再実行する
+2. 【手動】GitHub Actions の `Sync Asana` を `workflow_dispatch` / `dry_run=true` で1回実行し、Step Summary の作成/更新/移動件数を確認する
+3. 【手動】問題なければ `dry_run=false` で実反映、または次回 schedule/repository_dispatch に任せる
+4. 【手動】Asana PAT は 2027-03 頃に rotate する
+```
+
+## 11) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。2026-05-01 に `doctor:strict` を強化し `ASANA_ACCESS_TOKEN` 欠落を本番 sync 前に検知、93 tests pass、source 68件/missing 0件を確認。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `SecItemCopyMatching failed -50` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で実行し Step Summary を確認→問題なければ `dry_run=false` か次回 schedule に任せる。token rotate は2027-03頃
+```

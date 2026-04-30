@@ -42,6 +42,7 @@ jobs:
 
       - name: Inspect sync inputs
         env:
+          ASANA_ACCESS_TOKEN: ${{ secrets.ASANA_ACCESS_TOKEN }}
           ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
           ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
           ASANA_USE_STATUS_SECTIONS: ${{ vars.ASANA_USE_STATUS_SECTIONS || secrets.ASANA_USE_STATUS_SECTIONS || 'true' }}

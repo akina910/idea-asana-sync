@@ -324,7 +324,7 @@ describe("buildDoctorReport", () => {
       {
         sourceRepoPath: "/repo/source",
         sourceRepoUrl: "https://github.com/example/source",
-        asanaToken: null,
+        asanaToken: "token",
         projectUrl: null,
         useStatusSections: true,
         sectionName: null,
@@ -341,12 +341,34 @@ describe("buildDoctorReport", () => {
     assert.deepEqual(report.issues, ["strict doctor では ASANA_PROJECT_URL が必要です。"]);
   });
 
-  it("strict mode fails when source idea files are missing", () => {
+  it("strict mode requires an Asana access token before CI sync", () => {
     const report = buildDoctorReport(
       {
         sourceRepoPath: "/repo/source",
         sourceRepoUrl: "https://github.com/example/source",
         asanaToken: null,
+        projectUrl: "https://app.asana.com/0/123/list",
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+      },
+      [{ id: "BI-001", status: "分離済み", ideaPath: "ideas/BI-001.md" }],
+      "123",
+      { strict: true },
+    );
+
+    assert.equal(report.ok, false);
+    assert.equal(report.strict, true);
+    assert.equal(report.asana.hasAccessToken, false);
+    assert.deepEqual(report.issues, ["strict doctor では ASANA_ACCESS_TOKEN が必要です。"]);
+  });
+
+  it("strict mode fails when source idea files are missing", () => {
+    const report = buildDoctorReport(
+      {
+        sourceRepoPath: "/repo/source",
+        sourceRepoUrl: "https://github.com/example/source",
+        asanaToken: "token",
         projectUrl: "https://app.asana.com/0/123/list",
         useStatusSections: true,
         sectionName: null,

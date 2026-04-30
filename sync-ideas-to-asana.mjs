@@ -361,6 +361,9 @@ function buildDoctorIssues({ config, ideas, projectGid, missingIdeaFiles, strict
   }
 
   if (strict) {
+    if (!config.asanaToken) {
+      issues.push("strict doctor では ASANA_ACCESS_TOKEN が必要です。");
+    }
     if (!config.projectUrl) {
       issues.push("strict doctor では ASANA_PROJECT_URL が必要です。");
     }
