@@ -136,3 +136,55 @@
 ```md
 【手動・残り2ステップ】①GitHub/Copilot 認証を復旧して Copilot レビューを実行（SecItemCopyMatching failed -50 / gh token invalid を解消）②Actions `Sync Asana` を workflow_dispatch (`dry_run=false`) で1回実行して Asana 側の section 反映を確認。status-section はデフォルト有効化済み、Markdown table の `\|` 対応・`npm run doctor` source 68件/missing 0件/section予定13件・`npm test` 87件 pass 確認済み。token rotate は2027-03頃
 ```
+
+## 6) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 22. 2026-04-30 実装 — strict doctor preflight
+
+### 実施内容
+- `sync-ideas-to-asana.mjs` に `--doctor --strict` を追加
+- strict doctor では `ASANA_PROJECT_URL` 未設定/不正、または source 側 idea file 欠落時に non-zero exit で止める
+- `package.json` に `npm run doctor:strict` を追加
+- GitHub Actions の `Inspect sync inputs` step を `npm run doctor:strict` に変更し、本番 sync 前の入力不備を検出するようにした
+- `README.md` に strict doctor の用途を追記
+- `sync-ideas-to-asana.test.mjs` に strict doctor の failure 条件テスト2件を追加
+
+### 判断理由
+- Section 分けはデフォルト有効化済みで、残る価値は本番 sync 前に設定不備を確実に止めること
+- 旧 preflight は invalid `ASANA_PROJECT_URL` を JSON に出すだけで workflow を失敗させず、同期直前の検査として弱かった
+
+### 実行結果
+- `npm test`: 89/89 pass
+- `npm run doctor`: success。source 68件、missingIdeaFiles 0件、targetSections 13件
+- `ASANA_PROJECT_URL=https://app.asana.com/0/1234567890123456/list npm run doctor:strict`: success
+- `ASANA_PROJECT_URL` 未設定の `npm run doctor:strict`: exit 1 を確認
+- `npm run dry-run`: success。Asana token/project 未設定のため reconciliation は unavailable
+- `node --check sync-ideas-to-asana.mjs` / `node --check sync-ideas-to-asana.test.mjs` / `git diff --check`: pass
+
+### Cloudflare 確認結果
+- Cloudflare MCP tools はこのセッションで公開されておらず、`tool_search` でも該当ツールなし
+- 代替で Wrangler 4.77.0 から Workers/D1/KV/R2 照会を試行したが、`Unable to resolve Cloudflare's API hostname` で取得不可
+- BI-005 の現行主経路は GitHub Actions + Asana API のため、Cloudflare リソース作成は不要と判断
+
+### レビューゲート状況
+- Codex: 差分セルフレビュー実施。strict preflight は doctor 経路だけで Asana mutation 経路に入らないこと、CI では sync 前に不正入力を止めることを確認
+- Copilot: `copilot --help` / `copilot -p ...` / `gh copilot suggest ...` がいずれも `SecItemCopyMatching failed -50`。`gh auth status` も token invalid のため未通過
+- Claude: CLI 未導入（`claude: command not found`）
+
+### 次の一手（人間）
+1. 【手動・最優先】GitHub/Copilot 認証を復旧（`gh auth login -h github.com` 等）して Copilot レビューを再実行
+2. 【手動】Actions の `Sync Asana` を `workflow_dispatch` (`dry_run=false`) で1回実行し、Asana 側の section 反映を確認
+```
+
+## 7) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【手動・残り2ステップ】①GitHub/Copilot 認証を復旧して Copilot レビューを実行（SecItemCopyMatching failed -50 / gh token invalid を解消。今回の Copilot gate は未通過）②Actions `Sync Asana` を workflow_dispatch (`dry_run=false`) で1回実行して Asana 側の section 反映を確認。status-section はデフォルト有効化済み、strict preflight（`npm run doctor:strict`）追加済み、source 68件/missing 0件/section予定13件、`npm test` 89件 pass。token rotate は2027-03頃
+```

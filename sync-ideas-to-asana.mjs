@@ -26,6 +26,7 @@ const DEFAULT_ASANA_API_RETRY_BASE_MS = 500;
 
 async function main() {
   const doctorMode = process.argv.includes("--doctor");
+  const strictDoctorMode = doctorMode && process.argv.includes("--strict");
   const dryRun = process.argv.includes("--dry-run") || doctorMode;
   const config = loadConfig({ dryRun });
   const indexPath = path.join(config.sourceRepoPath, "status", "project-index.md");
@@ -34,7 +35,11 @@ async function main() {
   const ideas = await Promise.all(rows.map((row) => hydrateIdea(row, config)));
   const projectGid = extractProjectGidFromUrl(config.projectUrl);
   if (doctorMode) {
-    process.stdout.write(`${JSON.stringify(buildDoctorReport(config, ideas, projectGid), null, 2)}\n`);
+    const report = buildDoctorReport(config, ideas, projectGid, { strict: strictDoctorMode });
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    if (strictDoctorMode && !report.ok) {
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -311,17 +316,23 @@ export function resolveTargetSectionName(idea, config) {
   return normalizeSectionName(config.sectionName, { fallback: null });
 }
 
-export function buildDoctorReport(config, ideas, projectGid) {
+export function buildDoctorReport(config, ideas, projectGid, { strict = false } = {}) {
   const targetSections = [...new Set(ideas.map((idea) => resolveTargetSectionName(idea, config)).filter(Boolean))];
+  const missingIdeaFiles = ideas
+    .filter((idea) => idea.sourceFileMissing)
+    .map((idea) => ({ id: idea.id, path: idea.ideaPath }));
+  const issues = buildDoctorIssues({ config, ideas, projectGid, missingIdeaFiles, strict });
 
   return {
-    ok: Boolean(config.sourceRepoPath && ideas.length > 0),
+    ok: issues.length === 0,
+    strict,
+    issues,
     sourceRepoPath: config.sourceRepoPath,
     sourceRepoUrl: config.sourceRepoUrl,
     asana: {
       hasAccessToken: Boolean(config.asanaToken),
       projectGid,
-      projectUrlValid: !config.projectUrl || Boolean(projectGid),
+      projectUrlValid: config.projectUrl ? Boolean(projectGid) : !strict,
     },
     sections: {
       useStatusSections: config.useStatusSections,
@@ -331,11 +342,34 @@ export function buildDoctorReport(config, ideas, projectGid) {
     },
     source: {
       ideaCount: ideas.length,
-      missingIdeaFiles: ideas
-        .filter((idea) => idea.sourceFileMissing)
-        .map((idea) => ({ id: idea.id, path: idea.ideaPath })),
+      missingIdeaFiles,
     },
   };
+}
+
+function buildDoctorIssues({ config, ideas, projectGid, missingIdeaFiles, strict }) {
+  const issues = [];
+
+  if (!config.sourceRepoPath) {
+    issues.push("SOURCE_REPO_PATH を解決できませんでした。");
+  }
+  if (ideas.length === 0) {
+    issues.push("status/project-index.md から同期対象 idea を1件も読めませんでした。");
+  }
+  if (config.projectUrl && !projectGid) {
+    issues.push("ASANA_PROJECT_URL から project GID を解決できませんでした。");
+  }
+
+  if (strict) {
+    if (!config.projectUrl) {
+      issues.push("strict doctor では ASANA_PROJECT_URL が必要です。");
+    }
+    if (missingIdeaFiles.length > 0) {
+      issues.push(`strict doctor では missing idea file が 0 件である必要があります。現在 ${missingIdeaFiles.length} 件です。`);
+    }
+  }
+
+  return issues;
 }
 
 export function canonicalizeStatusForSection(status) {

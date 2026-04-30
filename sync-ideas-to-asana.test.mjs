@@ -283,6 +283,8 @@ describe("buildDoctorReport", () => {
     );
 
     assert.equal(report.ok, true);
+    assert.equal(report.strict, false);
+    assert.deepEqual(report.issues, []);
     assert.equal(report.asana.hasAccessToken, true);
     assert.equal(report.asana.projectGid, "123");
     assert.equal(report.asana.projectUrlValid, true);
@@ -310,7 +312,63 @@ describe("buildDoctorReport", () => {
     assert.equal(report.asana.hasAccessToken, false);
     assert.equal(report.asana.projectGid, null);
     assert.equal(report.asana.projectUrlValid, false);
+    assert.equal(report.ok, false);
+    assert.deepEqual(report.issues, ["ASANA_PROJECT_URL から project GID を解決できませんでした。"]);
     assert.deepEqual(report.sections.targetSections, ["Inbox"]);
+  });
+
+  it("strict mode requires an Asana project URL before CI sync", () => {
+    const report = buildDoctorReport(
+      {
+        sourceRepoPath: "/repo/source",
+        sourceRepoUrl: "https://github.com/example/source",
+        asanaToken: null,
+        projectUrl: null,
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+      },
+      [{ id: "BI-001", status: "分離済み", ideaPath: "ideas/BI-001.md" }],
+      null,
+      { strict: true },
+    );
+
+    assert.equal(report.ok, false);
+    assert.equal(report.strict, true);
+    assert.equal(report.asana.projectUrlValid, false);
+    assert.deepEqual(report.issues, ["strict doctor では ASANA_PROJECT_URL が必要です。"]);
+  });
+
+  it("strict mode fails when source idea files are missing", () => {
+    const report = buildDoctorReport(
+      {
+        sourceRepoPath: "/repo/source",
+        sourceRepoUrl: "https://github.com/example/source",
+        asanaToken: null,
+        projectUrl: "https://app.asana.com/0/123/list",
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+      },
+      [
+        {
+          id: "BI-001",
+          status: "分離済み",
+          ideaPath: "ideas/BI-001.md",
+          sourceFileMissing: true,
+        },
+      ],
+      "123",
+      { strict: true },
+    );
+
+    assert.equal(report.ok, false);
+    assert.deepEqual(report.source.missingIdeaFiles, [
+      { id: "BI-001", path: "ideas/BI-001.md" },
+    ]);
+    assert.deepEqual(report.issues, [
+      "strict doctor では missing idea file が 0 件である必要があります。現在 1 件です。",
+    ]);
   });
 });
 

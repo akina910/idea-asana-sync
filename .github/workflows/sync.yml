@@ -48,7 +48,7 @@ jobs:
           ASANA_STATUS_SECTION_MAP_JSON: ${{ vars.ASANA_STATUS_SECTION_MAP_JSON || secrets.ASANA_STATUS_SECTION_MAP_JSON }}
           SOURCE_REPO_PATH: ./source-bussines-idea
           SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
-        run: npm run doctor
+        run: npm run doctor:strict
 
       - name: Sync ideas to Asana
         env:
