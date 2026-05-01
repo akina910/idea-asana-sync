@@ -92,6 +92,13 @@ describe("parseBooleanFlag", () => {
     assert.equal(parseBooleanFlag("treu", { defaultValue: true }), true);
     assert.equal(parseBooleanFlag("treu", { defaultValue: false }), false);
   });
+
+  it("throws for unknown values in strict mode", () => {
+    assert.throws(
+      () => parseBooleanFlag("flase", { envName: "ASANA_USE_STATUS_SECTIONS", strict: true }),
+      /ASANA_USE_STATUS_SECTIONS は true\/false 系の値/,
+    );
+  });
 });
 
 describe("parseNonNegativeInteger", () => {
@@ -361,6 +368,30 @@ describe("buildDoctorReport", () => {
     assert.equal(report.strict, true);
     assert.equal(report.asana.hasAccessToken, false);
     assert.deepEqual(report.issues, ["strict doctor では ASANA_ACCESS_TOKEN が必要です。"]);
+  });
+
+  it("strict mode reports invalid boolean config without aborting report creation", () => {
+    const report = buildDoctorReport(
+      {
+        sourceRepoPath: "/repo/source",
+        sourceRepoUrl: "https://github.com/example/source",
+        asanaToken: "token",
+        projectUrl: "https://app.asana.com/0/123/list",
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+        configIssues: ["ASANA_USE_STATUS_SECTIONS は true/false 系の値で指定してください。"],
+      },
+      [{ id: "BI-001", status: "分離済み", ideaPath: "ideas/BI-001.md" }],
+      "123",
+      { strict: true },
+    );
+
+    assert.equal(report.ok, false);
+    assert.deepEqual(report.issues, [
+      "ASANA_USE_STATUS_SECTIONS は true/false 系の値で指定してください。",
+    ]);
+    assert.deepEqual(report.sections.targetSections, ["分離済み"]);
   });
 
   it("strict mode fails when source idea files are missing", () => {

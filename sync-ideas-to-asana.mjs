@@ -28,7 +28,7 @@ async function main() {
   const doctorMode = process.argv.includes("--doctor");
   const strictDoctorMode = doctorMode && process.argv.includes("--strict");
   const dryRun = process.argv.includes("--dry-run") || doctorMode;
-  const config = loadConfig({ dryRun });
+  const config = loadConfig({ dryRun, strict: strictDoctorMode });
   const indexPath = path.join(config.sourceRepoPath, "status", "project-index.md");
   const indexMarkdown = await fs.readFile(indexPath, "utf8");
   const rows = parseIndexTable(indexMarkdown);
@@ -149,7 +149,7 @@ async function main() {
   process.stdout.write(`${JSON.stringify({ projectGid, results }, null, 2)}\n`);
 }
 
-function loadConfig({ dryRun }) {
+function loadConfig({ dryRun, strict = false }) {
   const asanaToken = process.env.ASANA_ACCESS_TOKEN || null;
   const projectUrl = process.env.ASANA_PROJECT_URL || null;
 
@@ -162,8 +162,16 @@ function loadConfig({ dryRun }) {
   }
 
   const sectionName = normalizeSectionName(process.env.ASANA_SECTION_NAME, { fallback: null });
+  const configIssues = [];
+  const useStatusSectionsIssue = getBooleanFlagIssue(process.env.ASANA_USE_STATUS_SECTIONS, {
+    envName: "ASANA_USE_STATUS_SECTIONS",
+  });
+  if (strict && useStatusSectionsIssue) {
+    configIssues.push(useStatusSectionsIssue);
+  }
   const useStatusSections = parseBooleanFlag(process.env.ASANA_USE_STATUS_SECTIONS, {
     defaultValue: true,
+    envName: "ASANA_USE_STATUS_SECTIONS",
   });
   const statusSectionMap = parseStatusSectionMap(process.env.ASANA_STATUS_SECTION_MAP_JSON);
 
@@ -203,6 +211,7 @@ function loadConfig({ dryRun }) {
       DEFAULT_ASANA_API_RETRY_BASE_MS,
       { envName: "ASANA_API_RETRY_BASE_MS" },
     ),
+    configIssues,
   };
 }
 
@@ -236,7 +245,10 @@ export function resolveSourceRepoPath(explicitPath) {
   return detected || DEFAULT_SOURCE_REPO_PATH;
 }
 
-export function parseBooleanFlag(value, { defaultValue = false } = {}) {
+export function parseBooleanFlag(
+  value,
+  { defaultValue = false, envName = "value", strict = false } = {},
+) {
   if (typeof value !== "string") {
     return defaultValue;
   }
@@ -254,7 +266,32 @@ export function parseBooleanFlag(value, { defaultValue = false } = {}) {
     return false;
   }
 
+  if (strict) {
+    throw new Error(formatBooleanFlagIssue(envName));
+  }
+
   return defaultValue;
+}
+
+function getBooleanFlagIssue(value, { envName = "value" } = {}) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (
+    !normalized ||
+    TRUE_BOOLEAN_VALUES.has(normalized) ||
+    FALSE_BOOLEAN_VALUES.has(normalized)
+  ) {
+    return null;
+  }
+
+  return formatBooleanFlagIssue(envName);
+}
+
+function formatBooleanFlagIssue(envName) {
+  return `${envName} は true/false 系の値で指定してください。`;
 }
 
 export function normalizeSectionName(sectionName, { fallback = STATUS_SECTION_FALLBACK_NAME } = {}) {
@@ -348,7 +385,7 @@ export function buildDoctorReport(config, ideas, projectGid, { strict = false } 
 }
 
 function buildDoctorIssues({ config, ideas, projectGid, missingIdeaFiles, strict }) {
-  const issues = [];
+  const issues = [...(config.configIssues || [])];
 
   if (!config.sourceRepoPath) {
     issues.push("SOURCE_REPO_PATH を解決できませんでした。");

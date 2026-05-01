@@ -296,3 +296,52 @@ SOURCE_REPO_PATH=/Users/kiyo/Documents/GitHub/bussines_idea npm run dry-run:summ
 ```md
 【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。2026-05-01 に `doctor:strict` を強化し `ASANA_ACCESS_TOKEN` 欠落を本番 sync 前に検知、93 tests pass、source 68件/missing 0件を確認。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `SecItemCopyMatching failed -50` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で実行し Step Summary を確認→問題なければ `dry_run=false` か次回 schedule に任せる。token rotate は2027-03頃
 ```
+
+## 12) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 25. 2026-05-01 実装 — strict doctor の boolean typo 検出
+
+### 実施内容
+- `sync-ideas-to-asana.mjs` の `parseBooleanFlag()` に strict mode を追加
+- `--doctor --strict` 実行時、`ASANA_USE_STATUS_SECTIONS=flase` のような true/false 系として解釈できない値を non-zero exit で止めるようにした
+- 通常実行/通常 doctor では従来どおり unknown 値を default にフォールバックし、後方互換を維持
+- `sync-ideas-to-asana.test.mjs` に strict boolean typo の単体テストを追加
+- `README.md` に strict doctor で検出する設定不備として追記
+
+### 判断理由
+- Section 分けは既にデフォルト有効化済みで、残る価値は本番同期前の設定ミス検出
+- `ASANA_USE_STATUS_SECTIONS=false` に戻すつもりで typo すると、意図せず status section が作られるため、preflight で止めるのが最も運用リスクを下げる
+
+### 実行結果
+- `npm test`: 94/94 pass
+- `npm run doctor`: success。source 68件、missingIdeaFiles 0件、targetSections 13件
+- `ASANA_ACCESS_TOKEN=dummy ASANA_PROJECT_URL=https://app.asana.com/0/1234567890123456/list npm run doctor:strict`: success
+- `ASANA_ACCESS_TOKEN=dummy ASANA_PROJECT_URL=https://app.asana.com/0/1234567890123456/list ASANA_USE_STATUS_SECTIONS=flase npm run doctor:strict`: exit 1 を確認
+- `node --check sync-ideas-to-asana.mjs` / `node --check sync-ideas-to-asana.test.mjs` / `git diff --check`: pass
+
+### Cloudflare 確認結果
+- Cloudflare MCP tools はこのセッションで公開されておらず、`tool_search` でも `workers_list` / D1 / KV / R2 系ツールは見つからなかった
+- BI-005 の現行主経路は GitHub Actions + Asana API のため、Cloudflare リソース作成は不要と判断
+
+### レビューゲート状況
+- Codex: 差分セルフレビュー実施。strict doctor 経路だけに限定され、通常 sync の mutation 経路には影響しないことを確認
+- Copilot: `copilot --help` / `copilot -p ...` / `gh copilot -p ...` が `SecItemCopyMatching failed -50` で失敗。`gh auth status` も token invalid のため未通過
+- Claude: CLI 未導入（`claude: command not found`）
+
+### 次の一手（人間）
+1. 【手動・最優先】GitHub/Copilot 認証を復旧（`gh auth login -h github.com` 等）して Copilot レビューを再実行
+2. 【手動】Actions の `Sync Asana` を `workflow_dispatch` (`dry_run=true`) で summary を確認し、問題なければ `dry_run=false` で1回実行して Asana 側の section 反映を確認
+```
+
+## 13) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。`doctor:strict` は token/project/idea欠落に加えて `ASANA_USE_STATUS_SECTIONS` typo も本番 sync 前に検知。2026-05-01 検証: `npm test` 94件 pass、source 68件/missing 0件/section予定13件、strict typo は exit 1。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `SecItemCopyMatching failed -50` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
+```

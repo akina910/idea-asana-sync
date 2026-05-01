@@ -101,7 +101,7 @@ node sync-ideas-to-asana.mjs --dry-run
 `.env` は機密情報を含むため commit しないでください（`.env.example` のみ version 管理します）。
 
 `npm run doctor` は Asana を変更せず、source repo の読込件数、欠落 idea file、生成予定 section、`ASANA_PROJECT_URL` から解決した project GID を JSON で確認します。
-`npm run doctor:strict` は CI / 本番同期前の preflight 用です。`ASANA_ACCESS_TOKEN` / `ASANA_PROJECT_URL` が未設定、`ASANA_PROJECT_URL` が不正、もしくは source 側の idea file が欠落している場合は non-zero exit で止めます。
+`npm run doctor:strict` は CI / 本番同期前の preflight 用です。`ASANA_ACCESS_TOKEN` / `ASANA_PROJECT_URL` が未設定、`ASANA_PROJECT_URL` が不正、`ASANA_USE_STATUS_SECTIONS` が typo などで true/false 系として解釈できない、もしくは source 側の idea file が欠落している場合は non-zero exit で止めます。
 
 `ASANA_ACCESS_TOKEN` と `ASANA_PROJECT_URL` も渡すと、dry-run JSON に `reconciliation` が追加され、source 側に存在しない managed task や重複 managed task の削除候補も確認できます。
 既存 task を取得できる環境では、各 idea に `_taskAction` (`created / updated / unchanged`) と `_sectionAction` (`assigned / moved / unchanged`) も出るため、本番実行前に差分の有無を確認できます。
