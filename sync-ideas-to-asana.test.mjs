@@ -1,10 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   areTaskContentsEqual,
   buildDryRunMarkdownSummary,
   buildSourceRepoFileUrl,
   buildDoctorReport,
+  buildSuggestedSectionMapReport,
   buildTaskNotes,
   computeRetryDelayMs,
   createAsanaClient,
@@ -30,6 +35,7 @@ import {
   paginateAsanaCollection,
   planTaskReconciliation,
   resolveTargetSectionName,
+  suggestCompactSectionName,
   truncateNextAction,
 } from "./sync-ideas-to-asana.mjs";
 
@@ -496,6 +502,122 @@ describe("canonicalizeStatusForSection", () => {
   it("drops trailing parenthetical notes", () => {
     assert.equal(canonicalizeStatusForSection("着手中（要確認）"), "着手中");
     assert.equal(canonicalizeStatusForSection("手動待ち (token rotate)"), "手動待ち");
+  });
+});
+
+describe("suggestCompactSectionName", () => {
+  it("keeps mature workflow statuses as-is", () => {
+    assert.equal(suggestCompactSectionName("発想"), "発想");
+    assert.equal(suggestCompactSectionName("着手準備中"), "着手準備中");
+    assert.equal(suggestCompactSectionName("着手中"), "着手中");
+    assert.equal(suggestCompactSectionName("分離済み"), "分離済み");
+  });
+
+  it("folds implementation variants into compact Asana sections", () => {
+    assert.equal(suggestCompactSectionName("実装中"), "着手中");
+    assert.equal(suggestCompactSectionName("実装着手済み"), "着手中");
+    assert.equal(suggestCompactSectionName("Phase 1実装中"), "着手中");
+    assert.equal(suggestCompactSectionName("MVP実装済み"), "実装完了");
+    assert.equal(suggestCompactSectionName("MVP実装完了"), "実装完了");
+    assert.equal(suggestCompactSectionName("実装済み"), "実装完了");
+    assert.equal(suggestCompactSectionName("実装完了・デプロイ待ち"), "実装完了");
+    assert.equal(suggestCompactSectionName("分割済み"), "分離済み");
+  });
+
+  it("separates manual launch waits from normal in-progress work", () => {
+    assert.equal(suggestCompactSectionName("手動ローンチ実行待ち"), "手動待ち");
+  });
+});
+
+describe("buildSuggestedSectionMapReport", () => {
+  it("builds a copy-pasteable ASANA_STATUS_SECTION_MAP_JSON value", () => {
+    const report = buildSuggestedSectionMapReport([
+      { status: "着手中" },
+      { status: "実装中" },
+      { status: "実装完了・デプロイ待ち" },
+      { status: "分割済み" },
+      { status: "手動ローンチ実行待ち" },
+    ]);
+
+    assert.deepEqual(report.currentTargetSections, [
+      "分割済み",
+      "実装中",
+      "実装完了",
+      "手動ローンチ実行待ち",
+      "着手中",
+    ]);
+    assert.deepEqual(report.compactTargetSections, [
+      "分離済み",
+      "実装完了",
+      "手動待ち",
+      "着手中",
+    ]);
+    assert.deepEqual(report.statusSectionMap, {
+      "着手中": "着手中",
+      "実装中": "着手中",
+      "実装完了・デプロイ待ち": "実装完了",
+      "分割済み": "分離済み",
+      "手動ローンチ実行待ち": "手動待ち",
+    });
+    assert.equal(
+      report.asanaStatusSectionMapJson,
+      JSON.stringify(report.statusSectionMap),
+    );
+  });
+
+  it("treats special status names as normal JSON keys", () => {
+    const report = buildSuggestedSectionMapReport([
+      { status: "__proto__" },
+      { status: "constructor" },
+    ]);
+
+    assert.equal(Object.hasOwn(report.statusSectionMap, "__proto__"), true);
+    assert.equal(Object.hasOwn(report.statusSectionMap, "constructor"), true);
+    assert.equal(report.statusSectionMap.__proto__, "__proto__");
+    assert.equal(report.statusSectionMap.constructor, "constructor");
+    assert.equal(report.statusCount, 2);
+    assert.equal(
+      report.asanaStatusSectionMapJson,
+      '{"__proto__":"__proto__","constructor":"constructor"}',
+    );
+  });
+});
+
+describe("section-map:suggest CLI", () => {
+  it("ignores an invalid existing ASANA_STATUS_SECTION_MAP_JSON value", async () => {
+    const sourceRepoPath = await mkdtemp(path.join(tmpdir(), "idea-asana-sync-source-"));
+    await mkdir(path.join(sourceRepoPath, "status"));
+    await writeFile(
+      path.join(sourceRepoPath, "status", "project-index.md"),
+      [
+        "| ID | タイトル | タイプ | 一言 | 状態 | 実装 | 分離repo | 次アクション | 概要 | 詳細メモ | handoff |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| BI-001 | Test | Internal | summary | 実装中 | 着手中 | `repo` | next | `ideas/BI-001.md` | — | — |",
+        "",
+      ].join("\n"),
+    );
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [new URL("./sync-ideas-to-asana.mjs", import.meta.url).pathname, "--suggest-section-map"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ASANA_STATUS_SECTION_MAP_JSON: "not-json",
+            SOURCE_REPO_PATH: sourceRepoPath,
+            SOURCE_REPO_URL: "https://github.com/example/source",
+          },
+        },
+      );
+
+      assert.equal(result.status, 0, result.stderr);
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.statusSectionMap["実装中"], "着手中");
+    } finally {
+      await rm(sourceRepoPath, { recursive: true, force: true });
+    }
   });
 });
 

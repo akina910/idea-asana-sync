@@ -26,14 +26,24 @@ const DEFAULT_ASANA_API_RETRY_BASE_MS = 500;
 
 async function main() {
   const doctorMode = process.argv.includes("--doctor");
+  const suggestSectionMapMode = process.argv.includes("--suggest-section-map");
   const strictDoctorMode = doctorMode && process.argv.includes("--strict");
-  const dryRun = process.argv.includes("--dry-run") || doctorMode;
-  const config = loadConfig({ dryRun, strict: strictDoctorMode });
+  const dryRun = process.argv.includes("--dry-run") || doctorMode || suggestSectionMapMode;
+  const config = loadConfig({
+    dryRun,
+    strict: strictDoctorMode,
+    skipStatusSectionMap: suggestSectionMapMode,
+  });
   const indexPath = path.join(config.sourceRepoPath, "status", "project-index.md");
   const indexMarkdown = await fs.readFile(indexPath, "utf8");
   const rows = parseIndexTable(indexMarkdown);
   const ideas = await Promise.all(rows.map((row) => hydrateIdea(row, config)));
   const projectGid = extractProjectGidFromUrl(config.projectUrl);
+  if (suggestSectionMapMode) {
+    const report = buildSuggestedSectionMapReport(ideas);
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return;
+  }
   if (doctorMode) {
     const report = buildDoctorReport(config, ideas, projectGid, { strict: strictDoctorMode });
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -149,7 +159,7 @@ async function main() {
   process.stdout.write(`${JSON.stringify({ projectGid, results }, null, 2)}\n`);
 }
 
-function loadConfig({ dryRun, strict = false }) {
+function loadConfig({ dryRun, strict = false, skipStatusSectionMap = false }) {
   const asanaToken = process.env.ASANA_ACCESS_TOKEN || null;
   const projectUrl = process.env.ASANA_PROJECT_URL || null;
 
@@ -173,7 +183,9 @@ function loadConfig({ dryRun, strict = false }) {
     defaultValue: true,
     envName: "ASANA_USE_STATUS_SECTIONS",
   });
-  const statusSectionMap = parseStatusSectionMap(process.env.ASANA_STATUS_SECTION_MAP_JSON);
+  const statusSectionMap = skipStatusSectionMap
+    ? new Map()
+    : parseStatusSectionMap(process.env.ASANA_STATUS_SECTION_MAP_JSON);
 
   if (useStatusSections && sectionName) {
     console.warn(
@@ -420,6 +432,46 @@ export function canonicalizeStatusForSection(status) {
     .find(Boolean);
   const withoutTrailingParen = primaryToken?.replace(/\s*[（(][^）)]*[）)]\s*$/, "");
   return normalizeSectionName(withoutTrailingParen || normalizedStatus);
+}
+
+export function suggestCompactSectionName(status) {
+  const canonicalStatus = canonicalizeStatusForSection(status);
+  const grouping = new Map([
+    ["実装中", "着手中"],
+    ["実装着手済み", "着手中"],
+    ["Phase 1実装中", "着手中"],
+    ["MVP実装済み", "実装完了"],
+    ["MVP実装完了", "実装完了"],
+    ["実装済み", "実装完了"],
+    ["分割済み", "分離済み"],
+    ["手動ローンチ実行待ち", "手動待ち"],
+  ]);
+
+  return grouping.get(canonicalStatus) || canonicalStatus;
+}
+
+export function buildSuggestedSectionMapReport(ideas) {
+  const statusSectionMapEntries = new Map();
+  const currentTargetSections = new Set();
+  const compactTargetSections = new Set();
+
+  for (const idea of ideas) {
+    const normalizedStatus = normalizeSectionName(idea?.status);
+    const currentSection = canonicalizeStatusForSection(normalizedStatus);
+    const compactSection = suggestCompactSectionName(normalizedStatus);
+    statusSectionMapEntries.set(normalizedStatus, compactSection);
+    currentTargetSections.add(currentSection);
+    compactTargetSections.add(compactSection);
+  }
+  const statusSectionMap = Object.fromEntries(statusSectionMapEntries);
+
+  return {
+    statusCount: statusSectionMapEntries.size,
+    currentTargetSections: [...currentTargetSections].sort(),
+    compactTargetSections: [...compactTargetSections].sort(),
+    statusSectionMap,
+    asanaStatusSectionMapJson: JSON.stringify(statusSectionMap),
+  };
 }
 
 export function extractProjectGidFromUrl(projectUrl) {
