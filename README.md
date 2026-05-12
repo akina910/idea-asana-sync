@@ -128,6 +128,7 @@ node sync-ideas-to-asana.mjs
 - `workflow_dispatch` の `dry_run=true`: Asana を更新せず同期差分だけ検証
 - `workflow_dispatch` の `dry_run=false` または schedule/repository_dispatch: 実反映
 - 実行前に毎回 `npm test` と `npm run doctor:strict` が走るため、基本的な回帰と入力不備は workflow 側で検知できます
+- 実反映前にも毎回 dry-run summary を Step Summary に出すため、作成 / 更新 / section 移動 / 削除候補を Asana 変更前に確認できます
 
 ## ライセンス
 MIT

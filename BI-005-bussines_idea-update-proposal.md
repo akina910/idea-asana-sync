@@ -345,3 +345,50 @@ SOURCE_REPO_PATH=/Users/kiyo/Documents/GitHub/bussines_idea npm run dry-run:summ
 ```md
 【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。`doctor:strict` は token/project/idea欠落に加えて `ASANA_USE_STATUS_SECTIONS` typo も本番 sync 前に検知。2026-05-01 検証: `npm test` 94件 pass、source 68件/missing 0件/section予定13件、strict typo は exit 1。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `SecItemCopyMatching failed -50` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
 ```
+
+## 14) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 26. 2026-05-13 実装 — 本番同期前 dry-run summary 追加
+
+### 判断
+- BI-005 は分離済み / 公開中で、同期本体と status-based Section 分けは実装済み。
+- `ASANA_USE_STATUS_SECTIONS` は workflow 側で未設定時も `true` になるため、以前の「Variables に true を追加するだけ」は必須ではなくなっている。
+- 現在の `project-index.md` からは 68件を読め、idea file 欠落は 0件。status 由来 section は 13種で、必要なら `ASANA_STATUS_SECTION_MAP_JSON` で 6種へ圧縮できる。
+
+### 実施内容
+- 【自動化済み】`idea-asana-sync/.github/workflows/sync.yml` に `Preview sync plan` step を追加。
+- 本番同期 (`dry_run=false` / schedule / repository_dispatch) の前にも `node sync-ideas-to-asana.mjs --dry-run` と `summarize-dry-run.mjs` を実行し、GitHub Actions Step Summary に作成 / 更新 / section 移動 / 削除候補を出すようにした。
+- `README.md` の安全運用欄に、本番反映前の dry-run summary 追加を明記。
+
+### 確認
+- `npm test` で 101 tests pass。
+- `npm run doctor` で `ok: true`、source idea 68件、missing idea files 0件を確認。
+- `npm run section-map:suggest` で compact section 候補を確認。
+
+### 制約 / 未実施
+- Cloudflare MCP はこのセッションの `tool_search` で該当ツールが見つからず、Workers / D1 / KV の実リソース確認は未実施。なお BI-005 の実体は GitHub Actions + Asana API で、Cloudflare リソースは現構成上不要。
+- `bussines_idea` 側 handoff/status への直接追記は sandbox 書き込み許可外で拒否されたため、この proposal に反映案を残した。
+
+### レビューゲート状況
+- Codex: 差分セルフレビュー実施。初回レビューで `workflow_dispatch dry_run=true` 時に preview と既存 dry-run branch が二重実行される点を検出し、`Preview sync plan` に `if` 条件を追加して修正済み。
+- Copilot: `copilot -p ...` / `gh copilot ...` とも `No authentication information found` で実行不可。`gh auth status` も token invalid のため、必須 gate は未通過。
+- Claude: CLI 未導入（`claude` not found）のため実行不可。
+
+### 次に人間がやること
+- 【手動】GitHub Actions の `Sync Asana` を `dry_run=true` で1回実行し、Step Summary の差分を確認する。
+- 【手動】差分が妥当なら `dry_run=false` で実行する。section が増えすぎる場合のみ `npm run section-map:suggest` の `asanaStatusSectionMapJson` を `ASANA_STATUS_SECTION_MAP_JSON` variable に貼る。
+- 【手動】Asana PAT は 2027-03 頃までに rotate し、`ASANA_ACCESS_TOKEN` secret を更新する。
+```
+
+## 15) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。本番同期前にも GitHub Actions `Preview sync plan` で dry-run summary を Step Summary に出すようにし、作成/更新/section移動/削除候補を Asana 変更前に確認可能。2026-05-13 検証: `npm test` 101件 pass、`npm run doctor` ok、source 68件/missing 0件、section候補13件（必要なら `ASANA_STATUS_SECTION_MAP_JSON` で6件へ圧縮）。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `No authentication information found` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
+```

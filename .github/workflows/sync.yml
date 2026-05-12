@@ -51,6 +51,25 @@ jobs:
           SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
         run: npm run doctor:strict
 
+      - name: Preview sync plan
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != 'true' }}
+        env:
+          ASANA_ACCESS_TOKEN: ${{ secrets.ASANA_ACCESS_TOKEN }}
+          ASANA_PROJECT_URL: ${{ secrets.ASANA_PROJECT_URL }}
+          ASANA_SECTION_NAME: ${{ secrets.ASANA_SECTION_NAME }}
+          ASANA_USE_STATUS_SECTIONS: ${{ vars.ASANA_USE_STATUS_SECTIONS || secrets.ASANA_USE_STATUS_SECTIONS || 'true' }}
+          ASANA_STATUS_SECTION_MAP_JSON: ${{ vars.ASANA_STATUS_SECTION_MAP_JSON || secrets.ASANA_STATUS_SECTION_MAP_JSON }}
+          SOURCE_REPO_PATH: ./source-bussines-idea
+          SOURCE_REPO_URL: ${{ vars.SOURCE_REPO_URL || vars.BUSSINES_IDEA_REPO_URL || 'https://github.com/akina910/bussines_idea' }}
+        run: |
+          node sync-ideas-to-asana.mjs --dry-run > "$RUNNER_TEMP/asana-preflight.json"
+          node summarize-dry-run.mjs "$RUNNER_TEMP/asana-preflight.json" > "$RUNNER_TEMP/asana-preflight-summary.md"
+          cat "$RUNNER_TEMP/asana-preflight-summary.md"
+          if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            cat "$RUNNER_TEMP/asana-preflight-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          rm -f "$RUNNER_TEMP/asana-preflight.json" "$RUNNER_TEMP/asana-preflight-summary.md"
+
       - name: Sync ideas to Asana
         env:
           ASANA_ACCESS_TOKEN: ${{ secrets.ASANA_ACCESS_TOKEN }}
