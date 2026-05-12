@@ -98,16 +98,20 @@ async function main() {
   }
 
   if (dryRun) {
+    const canInspectExistingTasks = reconciliationPreview.available;
     const dryRunOutput = {
       projectGid,
       ideas: ideas.map((idea) => ({
         ...idea,
         _section: resolveTargetSectionName(idea, config),
-        _taskAction: describeDryRunTaskAction(existingTaskByIdeaId.get(idea.id), idea),
+        _taskAction: describeDryRunTaskAction(existingTaskByIdeaId.get(idea.id), idea, {
+          canInspectExistingTasks,
+        }),
         _sectionAction: describeDryRunSectionAction(
           existingTaskByIdeaId.get(idea.id),
           projectGid,
           resolveTargetSectionName(idea, config),
+          { canInspectExistingTasks },
         ),
       })),
       reconciliation: reconciliationPreview,
@@ -799,11 +803,11 @@ export function buildDryRunMarkdownSummary(dryRunOutput) {
     "",
     "### Task actions",
     "",
-    buildCountTable(summary.taskActions, ["created", "updated", "unchanged"]),
+    buildCountTable(summary.taskActions, ["created", "updated", "unchanged", "not-inspected"]),
     "",
     "### Section actions",
     "",
-    buildCountTable(summary.sectionActions, ["assigned", "moved", "unchanged"]),
+    buildCountTable(summary.sectionActions, ["assigned", "moved", "unchanged", "not-inspected"]),
     "",
     "### Reconciliation",
     "",
@@ -877,7 +881,11 @@ function getTaskSectionName(task, projectGid) {
   return membership?.section?.name || null;
 }
 
-function describeDryRunTaskAction(existingTask, idea) {
+function describeDryRunTaskAction(existingTask, idea, { canInspectExistingTasks = true } = {}) {
+  if (!canInspectExistingTasks) {
+    return "not-inspected";
+  }
+
   if (!existingTask) {
     return "created";
   }
@@ -885,9 +893,18 @@ function describeDryRunTaskAction(existingTask, idea) {
   return areTaskContentsEqual(existingTask, idea) ? "unchanged" : "updated";
 }
 
-function describeDryRunSectionAction(existingTask, projectGid, targetSectionName) {
+function describeDryRunSectionAction(
+  existingTask,
+  projectGid,
+  targetSectionName,
+  { canInspectExistingTasks = true } = {},
+) {
   if (!targetSectionName) {
     return null;
+  }
+
+  if (!canInspectExistingTasks) {
+    return "not-inspected";
   }
 
   if (!existingTask) {

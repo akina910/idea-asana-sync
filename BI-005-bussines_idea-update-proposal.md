@@ -392,3 +392,53 @@ SOURCE_REPO_PATH=/Users/kiyo/Documents/GitHub/bussines_idea npm run dry-run:summ
 ```md
 【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。本番同期前にも GitHub Actions `Preview sync plan` で dry-run summary を Step Summary に出すようにし、作成/更新/section移動/削除候補を Asana 変更前に確認可能。2026-05-13 検証: `npm test` 101件 pass、`npm run doctor` ok、source 68件/missing 0件、section候補13件（必要なら `ASANA_STATUS_SECTION_MAP_JSON` で6件へ圧縮）。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `No authentication information found` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
 ```
+
+## 16) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 27. 2026-05-13 実装 — dry-run 未検査表示の明確化
+
+### 実施内容
+- `sync-ideas-to-asana.mjs` の dry-run 出力を修正し、Asana 認証情報がなく既存 task を取得できない場合は `_taskAction` / `_sectionAction` を `not-inspected` と表示するようにした
+- `buildDryRunMarkdownSummary()` の集計表にも `not-inspected` 行を追加
+- `sync-ideas-to-asana.test.mjs` に認証なし dry-run CLI の回帰テストを追加
+- `README.md` に、認証なし dry-run は source 読込と section 名確認専用であり、作成 / 更新 / 移動件数の判断には使わない旨を追記
+
+### 判断理由
+- これまで認証なし dry-run では既存 task を見られないのに全件 `_taskAction: created` / `_sectionAction: assigned` と読める出力になり、ローカル確認時に「全件作成予定」と誤解する余地があった
+- BI-005 はすでに運用中の internal tool なので、新機能追加より本番前確認の誤読防止が価値の高い段階
+
+### 実行結果
+- `npm test`: 102/102 pass
+- `npm run dry-run:summary`: source 68件、Asana 未認証のため `not-inspected` 68件
+- `npm run doctor`: success。source 68件、missingIdeaFiles 0件、targetSections 13件
+- `node --check sync-ideas-to-asana.mjs` / `sync-ideas-to-asana.test.mjs` / `summarize-dry-run.mjs`: pass
+- `git diff --check`: pass
+
+### Cloudflare MCP 確認結果
+- Cloudflare MCP は `tool_search` で検索したが、今回セッションでは `workers_list` / `d1_databases_list` / `kv_namespaces_list` / `r2_buckets_list` / `accounts_list` が callable として提供されていなかった
+- BI-005 の現行主経路は GitHub Actions + Asana API であり、Cloudflare リソース作成は不要と判断
+
+### レビューゲート状況
+- Codex: 差分セルフレビュー実施。認証あり dry-run は既存の作成 / 更新 / 移動判定を維持し、認証なしの場合だけ `not-inspected` に落とすことを確認
+- Copilot: `copilot -p ...` / `gh copilot -p ...` とも `No authentication information found`。`gh auth status` も token invalid のため未通過
+- Claude: CLI 未導入（`claude: command not found`）のため実行不可
+
+### 次の一手（人間）
+1. 【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す
+2. 【手動】GitHub Actions の `Sync Asana` を `workflow_dispatch` / `dry_run=true` で実行し、Step Summary が `not-inspected` ではなく実際の作成 / 更新 / section 移動件数を出すことを確認する
+3. 【手動】問題なければ `workflow_dispatch` / `dry_run=false` を1回実行して Asana 側の section 反映を確認する
+4. 【手動】Asana PAT は 2027-03 頃までに rotate する
+```
+
+## 17) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。本番同期前 dry-run summary に加え、Asana 認証なし dry-run は作成/更新/移動を断定せず `not-inspected` 表示に修正済み。2026-05-13 検証: `npm test` 102件 pass、`npm run doctor` ok、source 68件/missing 0件、認証なし dry-run は `not-inspected` 68件。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `No authentication information found` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
+```

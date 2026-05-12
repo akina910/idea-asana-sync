@@ -480,7 +480,14 @@ describe("dry-run summary helpers", () => {
   it("explains why reconciliation is unavailable when Asana credentials are absent", () => {
     const markdown = buildDryRunMarkdownSummary({
       projectGid: null,
-      ideas: [],
+      ideas: [
+        {
+          id: "BI-001",
+          _section: "分離済み",
+          _taskAction: "not-inspected",
+          _sectionAction: "not-inspected",
+        },
+      ],
       reconciliation: {
         available: false,
         reason: "ASANA_ACCESS_TOKEN が未設定のため、既存 task の削除候補は計算できません。",
@@ -489,6 +496,7 @@ describe("dry-run summary helpers", () => {
 
     assert.match(markdown, /status: unavailable/);
     assert.match(markdown, /ASANA_ACCESS_TOKEN が未設定/);
+    assert.match(markdown, /\| not-inspected \| 1 \|/);
   });
 });
 
@@ -615,6 +623,54 @@ describe("section-map:suggest CLI", () => {
       assert.equal(result.status, 0, result.stderr);
       const report = JSON.parse(result.stdout);
       assert.equal(report.statusSectionMap["実装中"], "着手中");
+    } finally {
+      await rm(sourceRepoPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("dry-run CLI", () => {
+  it("marks task and section actions as not-inspected when Asana is unavailable", async () => {
+    const sourceRepoPath = await mkdtemp(path.join(tmpdir(), "idea-asana-sync-source-"));
+    await mkdir(path.join(sourceRepoPath, "status"));
+    await mkdir(path.join(sourceRepoPath, "ideas"));
+    await writeFile(
+      path.join(sourceRepoPath, "status", "project-index.md"),
+      [
+        "| ID | タイトル | タイプ | 一言 | 状態 | 実装 | 分離repo | 次アクション | 概要 | 詳細メモ | handoff |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| BI-001 | Test | Internal | row summary | 分離済み | 公開中 | `repo` | next | `ideas/BI-001.md` | — | — |",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(sourceRepoPath, "ideas", "BI-001.md"),
+      ["# Test", "", "## 一言", "file summary", ""].join("\n"),
+    );
+
+    const env = {
+      ...process.env,
+      SOURCE_REPO_PATH: sourceRepoPath,
+      SOURCE_REPO_URL: "https://github.com/example/source",
+    };
+    delete env.ASANA_ACCESS_TOKEN;
+    delete env.ASANA_PROJECT_URL;
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [new URL("./sync-ideas-to-asana.mjs", import.meta.url).pathname, "--dry-run"],
+        {
+          encoding: "utf8",
+          env,
+        },
+      );
+
+      assert.equal(result.status, 0, result.stderr);
+      const dryRunOutput = JSON.parse(result.stdout);
+      assert.equal(dryRunOutput.reconciliation.available, false);
+      assert.equal(dryRunOutput.ideas[0]._taskAction, "not-inspected");
+      assert.equal(dryRunOutput.ideas[0]._sectionAction, "not-inspected");
     } finally {
       await rm(sourceRepoPath, { recursive: true, force: true });
     }
