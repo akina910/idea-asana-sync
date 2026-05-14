@@ -14,6 +14,7 @@ import {
   computeRetryDelayMs,
   createAsanaClient,
   createSectionResolver,
+  createTask,
   extractProjectGidFromUrl,
   formatTaskFieldValue,
   isAsanaRetryEligibleRequest,
@@ -1314,6 +1315,76 @@ describe("createSectionResolver", () => {
       calls.filter((call) => call.method === "POST" && call.endpoint === "/projects/proj-1/sections").length,
       1,
     );
+  });
+});
+
+describe("createTask", () => {
+  it("creates in the project first, then assigns the created task to the target section", async () => {
+    const calls = [];
+    const asana = async (method, endpoint, { body } = {}) => {
+      calls.push({ method, endpoint, body });
+      if (method === "POST" && endpoint === "/tasks") {
+        return {
+          data: { gid: "task-1", name: body.name },
+        };
+      }
+      if (method === "POST" && endpoint === "/sections/sec-1/addTask") {
+        return { data: {} };
+      }
+      throw new Error("unexpected call");
+    };
+
+    const created = await createTask(
+      asana,
+      "proj-1",
+      {
+        taskName: "[BI-001] Test",
+        notes: "Managed-By: idea-asana-sync\nID: BI-001",
+      },
+      "sec-1",
+    );
+
+    assert.equal(created.gid, "task-1");
+    assert.deepEqual(calls, [
+      {
+        method: "POST",
+        endpoint: "/tasks",
+        body: {
+          name: "[BI-001] Test",
+          notes: "Managed-By: idea-asana-sync\nID: BI-001",
+          projects: ["proj-1"],
+        },
+      },
+      {
+        method: "POST",
+        endpoint: "/sections/sec-1/addTask",
+        body: { task: "task-1" },
+      },
+    ]);
+  });
+
+  it("does not call the section endpoint when no section is requested", async () => {
+    const calls = [];
+    const asana = async (method, endpoint, { body } = {}) => {
+      calls.push({ method, endpoint, body });
+      return {
+        data: { gid: "task-1", name: body.name },
+      };
+    };
+
+    await createTask(
+      asana,
+      "proj-1",
+      {
+        taskName: "[BI-001] Test",
+        notes: "Managed-By: idea-asana-sync\nID: BI-001",
+      },
+      null,
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].endpoint, "/tasks");
+    assert.equal(Object.hasOwn(calls[0].body, "memberships"), false);
   });
 });
 

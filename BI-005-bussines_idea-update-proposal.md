@@ -442,3 +442,61 @@ SOURCE_REPO_PATH=/Users/kiyo/Documents/GitHub/bussines_idea npm run dry-run:summ
 ```md
 【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。本番同期前 dry-run summary に加え、Asana 認証なし dry-run は作成/更新/移動を断定せず `not-inspected` 表示に修正済み。2026-05-13 検証: `npm test` 102件 pass、`npm run doctor` ok、source 68件/missing 0件、認証なし dry-run は `not-inspected` 68件。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `No authentication information found` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
 ```
+
+## 18) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 28. 2026-05-14 実装 — 新規 task の section 配置を公式 API 手順へ寄せた
+
+### 現状判断
+- BI-005 は「分離済み / 公開中」で、入口同期の主要機能は実装済み。
+- `ASANA_USE_STATUS_SECTIONS` は workflow / README 上で未設定時も `true` がデフォルトになっているため、以前の「Variables に true を追加するだけ」は必須ではなくなっている。
+- 2026-05-14 のローカル確認では source repo から 68 件を読み込み、missing idea file は 0 件。
+
+### 実施内容
+- `idea-asana-sync/sync-ideas-to-asana.mjs`
+  - 新規 task 作成時に `memberships` を `POST /tasks` へ渡すのをやめた。
+  - まず `projects: [projectGid]` で task を作成し、section 指定がある場合は作成後に `/sections/{section_gid}/addTask` で配置する二段階処理へ変更。
+  - `createTask()` を export し、API 呼び出し順をテスト可能にした。
+- `idea-asana-sync/sync-ideas-to-asana.test.mjs`
+  - 新規 task 作成時に `memberships` を送らないこと、作成後に section endpoint が呼ばれることをテスト追加。
+- `idea-asana-sync/README.md`
+  - 新規 task は project 作成後に section 配置する運用であることを明記。
+
+### 判断理由
+- Asana の公式 API では、task を project に入れる処理と section へ入れる処理が明示的に分かれている。
+- section 分けを本番有効化した後に、新規 task 作成が `memberships` 解釈差で失敗するリスクを下げるのが、今いちばん価値が高いと判断した。
+
+### 実行結果
+- `npm test`: 104/104 pass
+- `git diff --check`: pass
+- `npm run doctor`: ok=true / source 68 件 / missingIdeaFiles 0 件
+- `npm run dry-run:summary`: Asana 認証情報なしのため既存 task 検査は `not-inspected`、source 読み込みと section 名生成は確認済み
+
+### Cloudflare MCP 確認結果
+- Cloudflare MCP は `tool_search` で確認したが、今回セッションでは Cloudflare workers/D1/KV/R2/account 系ツールが callable として提供されなかった。
+- BI-005 の現行構成は GitHub Actions + Asana API であり、Cloudflare リソースは作成していない。
+
+### レビューゲート状況
+- Codex: CLI は `command -v codex` で見つからず、CLI レビュー不可。差分セルフレビューでは task 作成 body から `memberships` が消え、section 配置は作成後の `addTask` に限定されていることを確認。
+- Copilot: CLI は存在したが `No authentication information found` でレビュー不可。`gh auth status` でも GitHub token invalid。Copilot gate は未通過。
+- Claude: CLI は `command -v claude` で見つからず、CLI レビュー不可。
+
+### 次の一手（人間）
+1. 【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す。
+2. 【手動】GitHub Actions の `Sync Asana` を `workflow_dispatch` + `dry_run=true` で実行し、Step Summary の created/updated/moved/removed 件数と targetSections を確認する。
+3. 【手動】dry-run summary が妥当なら `dry_run=false` で実反映し、Asana 上で新規 task が status section に入ることを確認する。
+4. 【手動】Asana PAT rotate は 2027-03 頃までに実施する。
+```
+
+## 19) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。新規 task は project 作成後に `/sections/{section_gid}/addTask` で section 配置する公式 API 寄せへ修正済み。2026-05-14 検証: `npm test` 104件 pass、`npm run doctor` ok、source 68件/missing 0件、認証なし dry-run は `not-inspected` 68件。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `No authentication information found` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
+```

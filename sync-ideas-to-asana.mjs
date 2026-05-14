@@ -1178,19 +1178,19 @@ export function createSectionResolver(asana, projectGid) {
   };
 }
 
-async function createTask(asana, projectGid, idea, sectionGid) {
+export async function createTask(asana, projectGid, idea, sectionGid) {
   const body = {
     name: idea.taskName,
     notes: idea.notes,
     projects: [projectGid],
   };
 
-  if (sectionGid) {
-    body.memberships = [{ project: projectGid, section: sectionGid }];
-  }
-
   const response = await asana("POST", "/tasks", { body });
-  return response.data;
+  const created = response.data;
+  if (sectionGid) {
+    await addTaskToSection(asana, sectionGid, created.gid);
+  }
+  return created;
 }
 
 async function updateTask(asana, taskGid, idea) {
