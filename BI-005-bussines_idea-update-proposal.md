@@ -500,3 +500,59 @@ SOURCE_REPO_PATH=/Users/kiyo/Documents/GitHub/bussines_idea npm run dry-run:summ
 ```md
 【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。新規 task は project 作成後に `/sections/{section_gid}/addTask` で section 配置する公式 API 寄せへ修正済み。2026-05-14 検証: `npm test` 104件 pass、`npm run doctor` ok、source 68件/missing 0件、認証なし dry-run は `not-inspected` 68件。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `No authentication information found` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
 ```
+
+## 20) handoff 追記案（今回分）
+対象: `bussines_idea/handoff/BI-005-asana-idea-sync-handoff.md`
+
+末尾に追記:
+
+```md
+## 29. 2026-05-15 実装 — compact status sections デフォルト化
+
+### 実施内容
+- `sync-ideas-to-asana.mjs` に `ASANA_COMPACT_STATUS_SECTIONS` を追加
+- 未設定時は `true` とし、`実装中` / `実装着手済み` / `Phase 1実装中` を `着手中`、`MVP実装済み` / `MVP実装完了` / `実装済み` を `実装完了`、`分割済み` を `分離済み`、`手動ローンチ実行待ち` を `手動待ち` に自動で寄せるようにした
+- `ASANA_COMPACT_STATUS_SECTIONS=false` で従来の canonical status section に戻せる
+- `ASANA_STATUS_SECTION_MAP_JSON` は引き続き最優先で、raw status / canonical status / compact section 名の順に照合する
+- GitHub Actions の `Inspect sync inputs` / `Preview sync plan` / `Sync ideas to Asana` に `ASANA_COMPACT_STATUS_SECTIONS` を追加
+- `section-map:suggest` の `currentTargetSections` を実際の default compact sections に合わせ、従来の13種は `canonicalTargetSections` として残した
+- `README.md` / `.env.example` / unit tests を更新
+
+### 判断理由
+- `bussines_idea` の source は 68 件まで増え、status 値は 13 種になっていた
+- Asana は入口一覧であり、細かい実装状態をそのまま section 化すると見通しが悪くなる
+- doctor 実測で targetSections が 13 種から 6 種（`着手中` / `着手準備中` / `分離済み` / `手動待ち` / `実装完了` / `発想`）へ圧縮されることを確認
+
+### 実行結果
+- `npm test`: 108/108 pass
+- `npm run doctor`: source 68件、missingIdeaFiles 0件、targetSections 6件
+- `npm run section-map:suggest`: `currentTargetSections` 6件、`canonicalTargetSections` 13件
+- `npm run dry-run:summary`: success（Asana token/project 未設定のため existing task inspection は unavailable）
+- `ASANA_ACCESS_TOKEN=dummy ASANA_PROJECT_URL=https://app.asana.com/0/1234567890123456/list npm run doctor:strict`: success
+- `ASANA_COMPACT_STATUS_SECTIONS=maybe` 付き strict doctor: exit 1（誤設定検知）
+- `node --check sync-ideas-to-asana.mjs` / `node --check sync-ideas-to-asana.test.mjs` / `node --check summarize-dry-run.mjs` / `git diff --check`: pass
+
+### Cloudflare 確認結果
+- Cloudflare MCP tools は今回セッションで公開されておらず、`tool_search` でも該当ツールなし
+- 代替で Wrangler 4.77.0 を確認したが、`wrangler whoami` は `Unable to resolve Cloudflare's API hostname` で実リソース照会不可
+- BI-005 の現行主経路は GitHub Actions + Asana API のため、Cloudflare Workers / D1 / KV / R2 は作成不要と判断
+
+### レビューゲート状況
+- Codex: 差分セルフレビュー実施。compact routing は section 名解決と doctor/dry-run 表示に限定され、Asana task 本文生成・reconciliation の所有判定には影響しないことを確認
+- Copilot: `copilot` CLI は存在するが、初回は cache 書き込み EPERM、`HOME=/private/tmp XDG_CACHE_HOME=/private/tmp/.cache` で回避後、最終的に `No authentication information found` で未通過。`gh auth status` も token invalid
+- Claude: CLI 未導入（`claude` not found）のため未通過
+
+### 次の一手（人間）
+1. 【手動・最優先】GitHub/Copilot 認証を復旧（`gh auth login -h github.com` など）し、Copilot review gate を再実行する
+2. 【手動】Actions の `Sync Asana` を `workflow_dispatch` (`dry_run=true`) で確認し、targetSections が6種へ寄ることを Step Summary で確認する
+3. 【手動】問題なければ `workflow_dispatch` (`dry_run=false`) を実行して Asana 側の section 反映を確認する
+```
+
+## 21) project-index 行更新案（今回分）
+対象: `bussines_idea/status/project-index.md` の BI-005 行 `次アクション`
+
+置換後:
+
+```md
+【自動化済み】status-based Section は未設定でも default true。有効化 variable 追加は不要。`ASANA_COMPACT_STATUS_SECTIONS` も default true とし、状態13種を Asana 入口向けの6 section（着手中/着手準備中/分離済み/手動待ち/実装完了/発想）へ自動圧縮する実装を追加済み。2026-05-15 検証: `npm test` 108件 pass、`npm run doctor` source 68件/missing 0件/targetSections 6件、`npm run dry-run:summary` success。【手動・最優先】GitHub/Copilot 認証を復旧して Copilot review gate を通す（現状 `No authentication information found` / gh token invalid）。【手動・次】Actions `Sync Asana` を `workflow_dispatch` / `dry_run=true` で Step Summary 確認→問題なければ `dry_run=false`。token rotate は2027-03頃
+```

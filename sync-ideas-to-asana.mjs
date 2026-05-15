@@ -183,9 +183,19 @@ function loadConfig({ dryRun, strict = false, skipStatusSectionMap = false }) {
   if (strict && useStatusSectionsIssue) {
     configIssues.push(useStatusSectionsIssue);
   }
+  const compactStatusSectionsIssue = getBooleanFlagIssue(process.env.ASANA_COMPACT_STATUS_SECTIONS, {
+    envName: "ASANA_COMPACT_STATUS_SECTIONS",
+  });
+  if (strict && compactStatusSectionsIssue) {
+    configIssues.push(compactStatusSectionsIssue);
+  }
   const useStatusSections = parseBooleanFlag(process.env.ASANA_USE_STATUS_SECTIONS, {
     defaultValue: true,
     envName: "ASANA_USE_STATUS_SECTIONS",
+  });
+  const compactStatusSections = parseBooleanFlag(process.env.ASANA_COMPACT_STATUS_SECTIONS, {
+    defaultValue: true,
+    envName: "ASANA_COMPACT_STATUS_SECTIONS",
   });
   const statusSectionMap = skipStatusSectionMap
     ? new Map()
@@ -207,6 +217,7 @@ function loadConfig({ dryRun, strict = false, skipStatusSectionMap = false }) {
     projectUrl,
     sectionName,
     useStatusSections,
+    compactStatusSections,
     statusSectionMap,
     sourceRepoPath: resolveSourceRepoPath(
       process.env.SOURCE_REPO_PATH || process.env.BUSSINES_IDEA_REPO_PATH || null,
@@ -360,10 +371,15 @@ export function resolveTargetSectionName(idea, config) {
   if (config.useStatusSections) {
     const normalizedStatus = normalizeSectionName(idea?.status);
     const canonicalStatus = canonicalizeStatusForSection(normalizedStatus);
+    const compactStatus =
+      config.compactStatusSections === false
+        ? canonicalStatus
+        : suggestCompactSectionName(normalizedStatus);
     const mappedSection =
       config.statusSectionMap?.get(normalizedStatus) ||
-      config.statusSectionMap?.get(canonicalStatus);
-    return normalizeSectionName(mappedSection || canonicalStatus);
+      config.statusSectionMap?.get(canonicalStatus) ||
+      config.statusSectionMap?.get(compactStatus);
+    return normalizeSectionName(mappedSection || compactStatus);
   }
 
   return normalizeSectionName(config.sectionName, { fallback: null });
@@ -389,6 +405,9 @@ export function buildDoctorReport(config, ideas, projectGid, { strict = false } 
     },
     sections: {
       useStatusSections: config.useStatusSections,
+      compactStatusSections: config.useStatusSections
+        ? config.compactStatusSections !== false
+        : false,
       fixedSectionName: config.useStatusSections ? null : config.sectionName,
       statusSectionMapSize: config.statusSectionMap?.size || 0,
       targetSections,
@@ -456,7 +475,7 @@ export function suggestCompactSectionName(status) {
 
 export function buildSuggestedSectionMapReport(ideas) {
   const statusSectionMapEntries = new Map();
-  const currentTargetSections = new Set();
+  const canonicalTargetSections = new Set();
   const compactTargetSections = new Set();
 
   for (const idea of ideas) {
@@ -464,15 +483,17 @@ export function buildSuggestedSectionMapReport(ideas) {
     const currentSection = canonicalizeStatusForSection(normalizedStatus);
     const compactSection = suggestCompactSectionName(normalizedStatus);
     statusSectionMapEntries.set(normalizedStatus, compactSection);
-    currentTargetSections.add(currentSection);
+    canonicalTargetSections.add(currentSection);
     compactTargetSections.add(compactSection);
   }
   const statusSectionMap = Object.fromEntries(statusSectionMapEntries);
+  const compactSections = [...compactTargetSections].sort();
 
   return {
     statusCount: statusSectionMapEntries.size,
-    currentTargetSections: [...currentTargetSections].sort(),
-    compactTargetSections: [...compactTargetSections].sort(),
+    currentTargetSections: compactSections,
+    canonicalTargetSections: [...canonicalTargetSections].sort(),
+    compactTargetSections: compactSections,
     statusSectionMap,
     asanaStatusSectionMapJson: JSON.stringify(statusSectionMap),
   };

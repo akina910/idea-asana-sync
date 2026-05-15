@@ -230,6 +230,44 @@ describe("resolveTargetSectionName", () => {
     assert.equal(section, "実装完了");
   });
 
+  it("compacts known implementation statuses by default", () => {
+    assert.equal(
+      resolveTargetSectionName(
+        { status: "実装中" },
+        {
+          useStatusSections: true,
+          sectionName: null,
+          statusSectionMap: new Map(),
+        },
+      ),
+      "着手中",
+    );
+    assert.equal(
+      resolveTargetSectionName(
+        { status: "MVP実装済み" },
+        {
+          useStatusSections: true,
+          sectionName: null,
+          statusSectionMap: new Map(),
+        },
+      ),
+      "実装完了",
+    );
+  });
+
+  it("can opt out of compact status sections", () => {
+    const section = resolveTargetSectionName(
+      { status: "実装中" },
+      {
+        useStatusSections: true,
+        compactStatusSections: false,
+        sectionName: null,
+        statusSectionMap: new Map(),
+      },
+    );
+    assert.equal(section, "実装中");
+  });
+
   it("supports map lookup with canonicalized status keys", () => {
     const section = resolveTargetSectionName(
       { status: "実装完了・デプロイ待ち" },
@@ -240,6 +278,18 @@ describe("resolveTargetSectionName", () => {
       },
     );
     assert.equal(section, "リリース前");
+  });
+
+  it("supports map lookup with compact status keys", () => {
+    const section = resolveTargetSectionName(
+      { status: "実装中" },
+      {
+        useStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map([["着手中", "実装進行中"]]),
+      },
+    );
+    assert.equal(section, "実装進行中");
   });
 
   it("uses fixed section in legacy mode", () => {
@@ -305,6 +355,7 @@ describe("buildDoctorReport", () => {
     assert.equal(report.asana.projectGid, "123");
     assert.equal(report.asana.projectUrlValid, true);
     assert.deepEqual(report.sections.targetSections, ["分離済み", "要対応"]);
+    assert.equal(report.sections.compactStatusSections, true);
     assert.deepEqual(report.source.missingIdeaFiles, [
       { id: "BI-002", path: "ideas/BI-002.md" },
     ]);
@@ -399,6 +450,31 @@ describe("buildDoctorReport", () => {
       "ASANA_USE_STATUS_SECTIONS は true/false 系の値で指定してください。",
     ]);
     assert.deepEqual(report.sections.targetSections, ["分離済み"]);
+  });
+
+  it("strict mode reports invalid compact status section config", () => {
+    const report = buildDoctorReport(
+      {
+        sourceRepoPath: "/repo/source",
+        sourceRepoUrl: "https://github.com/example/source",
+        asanaToken: "token",
+        projectUrl: "https://app.asana.com/0/123/list",
+        useStatusSections: true,
+        compactStatusSections: true,
+        sectionName: null,
+        statusSectionMap: new Map(),
+        configIssues: ["ASANA_COMPACT_STATUS_SECTIONS は true/false 系の値で指定してください。"],
+      },
+      [{ id: "BI-001", status: "実装中", ideaPath: "ideas/BI-001.md" }],
+      "123",
+      { strict: true },
+    );
+
+    assert.equal(report.ok, false);
+    assert.deepEqual(report.issues, [
+      "ASANA_COMPACT_STATUS_SECTIONS は true/false 系の値で指定してください。",
+    ]);
+    assert.deepEqual(report.sections.targetSections, ["着手中"]);
   });
 
   it("strict mode fails when source idea files are missing", () => {
@@ -549,6 +625,12 @@ describe("buildSuggestedSectionMapReport", () => {
     ]);
 
     assert.deepEqual(report.currentTargetSections, [
+      "分離済み",
+      "実装完了",
+      "手動待ち",
+      "着手中",
+    ]);
+    assert.deepEqual(report.canonicalTargetSections, [
       "分割済み",
       "実装中",
       "実装完了",
