@@ -23,6 +23,7 @@ const ASANA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const ASANA_RETRYABLE_METHODS = new Set(["GET", "PUT"]);
 const DEFAULT_ASANA_API_MAX_RETRIES = 3;
 const DEFAULT_ASANA_API_RETRY_BASE_MS = 500;
+const DEFAULT_ASANA_RECONCILE_REMOVAL_LIMIT = 20;
 
 async function main() {
   const doctorMode = process.argv.includes("--doctor");
@@ -119,6 +120,11 @@ async function main() {
     process.stdout.write(`${JSON.stringify(dryRunOutput, null, 2)}\n`);
     return;
   }
+
+  assertReconciliationRemovalLimit(
+    { orphanedTasksToRemove, duplicateTasksToRemove },
+    config.reconcileRemovalLimit,
+  );
 
   const results = [];
   for (const task of orphanedTasksToRemove) {
@@ -237,6 +243,11 @@ function loadConfig({ dryRun, strict = false, skipStatusSectionMap = false }) {
       process.env.ASANA_API_RETRY_BASE_MS,
       DEFAULT_ASANA_API_RETRY_BASE_MS,
       { envName: "ASANA_API_RETRY_BASE_MS" },
+    ),
+    reconcileRemovalLimit: parseNonNegativeInteger(
+      process.env.ASANA_RECONCILE_REMOVAL_LIMIT,
+      DEFAULT_ASANA_RECONCILE_REMOVAL_LIMIT,
+      { envName: "ASANA_RECONCILE_REMOVAL_LIMIT" },
     ),
     configIssues,
   };
@@ -773,6 +784,24 @@ export function planTaskReconciliation(tasks, ideas) {
     duplicateTasksToRemove,
     orphanedTasksToRemove,
   };
+}
+
+export function assertReconciliationRemovalLimit(reconciliationPlan, limit) {
+  const orphanedCount = reconciliationPlan?.orphanedTasksToRemove?.length || 0;
+  const duplicateCount = reconciliationPlan?.duplicateTasksToRemove?.length || 0;
+  const total = orphanedCount + duplicateCount;
+
+  if (total <= limit) {
+    return;
+  }
+
+  throw new Error(
+    [
+      `Asana removal candidate count ${total} exceeds ASANA_RECONCILE_REMOVAL_LIMIT=${limit}.`,
+      `orphaned=${orphanedCount}, duplicate=${duplicateCount}.`,
+      "Run dry-run to inspect candidates, then raise ASANA_RECONCILE_REMOVAL_LIMIT only if the removals are expected.",
+    ].join(" "),
+  );
 }
 
 export function summarizeDryRunOutput(dryRunOutput) {

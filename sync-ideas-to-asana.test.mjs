@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   areTaskContentsEqual,
+  assertReconciliationRemovalLimit,
   buildDryRunMarkdownSummary,
   buildSourceRepoFileUrl,
   buildDoctorReport,
@@ -1659,5 +1660,33 @@ describe("planTaskReconciliation", () => {
     assert.equal(plan.existingTaskByIdeaId.size, 0);
     assert.deepEqual(plan.duplicateTasksToRemove, []);
     assert.deepEqual(plan.orphanedTasksToRemove, []);
+  });
+});
+
+describe("assertReconciliationRemovalLimit", () => {
+  it("allows removal plans at the configured limit", () => {
+    assert.doesNotThrow(() =>
+      assertReconciliationRemovalLimit(
+        {
+          orphanedTasksToRemove: [{ gid: "orphan-1" }],
+          duplicateTasksToRemove: [{ gid: "duplicate-1" }],
+        },
+        2,
+      ),
+    );
+  });
+
+  it("throws when removal candidates exceed the configured limit", () => {
+    assert.throws(
+      () =>
+        assertReconciliationRemovalLimit(
+          {
+            orphanedTasksToRemove: [{ gid: "orphan-1" }, { gid: "orphan-2" }],
+            duplicateTasksToRemove: [{ gid: "duplicate-1" }],
+          },
+          2,
+        ),
+      /Asana removal candidate count 3 exceeds ASANA_RECONCILE_REMOVAL_LIMIT=2/,
+    );
   });
 });
